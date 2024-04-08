@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import matplotlib.pyplot as plt
 from bagpy import bagreader
 from rosbags.image import message_to_cvimage
 from collections import defaultdict
@@ -28,15 +29,14 @@ def msgs(bag):
         "/camera_left/color/image_raw",
         "/camera_left/aligned_depth_to_color/image_raw",
         "/camera_left/depth/color/points",
-        "/front_lidar/velodyne_points",
-        "/camera_left/aligned_depth_to_color/camera_info"
-
+        "/camera_left/aligned_depth_to_color/camera_info",
+        "/detected_persons/yolo"
     ]
     image_msgs = []
     depth_msgs = []
     depth_pts_msgs = []
-    pc_msgs = []
-    depth_ci = []
+    pers_msgs = []
+    ci_msgs = []
 
     counter1 = 100
     counter2 = 100
@@ -59,12 +59,12 @@ def msgs(bag):
                 depth_pts_msgs.append(msg)
                 counter3 -= 1
 
-            if topic == "/front_lidar/velodyne_points":
-                pc_msgs.append(msg)
+            if topic == "/camera_left/aligned_depth_to_color/camera_info":
+                ci_msgs.append(msg)
                 counter4 -= 1
 
-            if topic == "/camera_left/aligned_depth_to_color/camera_info":
-                depth_ci.append(msg)
+            if topic =="/detected_persons/yolo":
+                pers_msgs.append(msg)
                 counter5 -=1
         else:
                 break
@@ -76,8 +76,8 @@ def msgs(bag):
         "image_msgs": image_msgs,
         "depth_msgs": depth_msgs,
         "depth_pts_msgs": depth_pts_msgs,
-        "pc_msgs": pc_msgs,
-        "ci_msgs": depth_ci
+        "pers_msgs": pers_msgs,
+        "ci_msgs": ci_msgs,
     }
 
     return data_params
@@ -109,11 +109,15 @@ def get_frames(data_params):
     for i in range(100):
         tmp_msg = data_params["image_msgs"][i]
         img = message_to_cvimage(tmp_msg)
+        #print("img header: ",tmp_msg.header)
         imgs.append(img)
 
         depth_msg = data_params["depth_msgs"][i]
         img2 = message_to_cvimage(depth_msg)
         depths.append(img2)
+
+        break
+    
     return imgs, depths
 
 def get_camera_info(data_params):
@@ -128,6 +132,7 @@ def load_model():
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5  # set threshold for this model
     # Find a model from detectron2's model zoo. You can use the https://dl.fbaipublicfiles... url as well
     cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
+    cfg.MODEL.DEVICE = "cpu"
     predictor = DefaultPredictor(cfg)
     return cfg, predictor
 
@@ -148,6 +153,9 @@ def track(images):
         out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
         annotated_frame = out.get_image()[:, :, ::-1]
         print(annotated_frame.shape)
+        cv.imshow("test", annotated_frame)
+        cv.waitKey(0)
+        break
         video.write(annotated_frame)
         
     cv.destroyAllWindows()
@@ -155,23 +163,13 @@ def track(images):
 
 
 def get_positions(images, depths, cameraInfo):
-    img = images[50]
-    depth = depths[50]
 
-    cfg, predictor = load_model()
-    outputs = predictor(img)
-    bbox = outputs['instances'].get('pred_boxes')[1].to("cpu")
-    center = bbox.get_centers().numpy()[0]
-    bbox_np = bbox.tensor.numpy()[0]
+    results = []
 
-    depth_val = depth[int(center[0])][int(center[1])]
+    img = images[0].copy()
+    depth = depths[0]
 
-    cv.rectangle(img, (int(bbox_np[0]), int(bbox_np[1])), (int(bbox_np[2]), int(bbox_np[3])), (0,255,0), 3)
-
-    cv.circle(img, (int(center[0]), int(center[1])), radius=0, color=(0,0,255), thickness=4)
-
-    cv.imwrite("detected.jpg", img)
-    
+    # load intrinsic parameters for depth calculation
     intrinsics = rs2.intrinsics()
     intrinsics.width = cameraInfo.width
     intrinsics.height = cameraInfo.height
@@ -184,22 +182,85 @@ def get_positions(images, depths, cameraInfo):
     elif cameraInfo.distortion_model == 'equidistant':
         intrinsics.model = rs2.distortion.kannala_brandt4
     intrinsics.coeffs = [i for i in cameraInfo.D] 
-    result = rs2.rs2_deproject_pixel_to_point(intrinsics, [int(bbox_np[0]), int(bbox_np[1])], depth_val)
-    print(result)
+
+    cfg, predictor = load_model()
+    outputs = predictor(img)
+
+    for i in range(len(outputs['instances'].get('pred_boxes'))):
+        bbox = outputs['instances'].get('pred_boxes')[i].to("cpu")
+        score = outputs['instances'].get('scores')[i].to("cpu")
+        center = bbox.get_centers().numpy()[0]
+        bbox_np = bbox.tensor.numpy()[0]
+        
+        if center[0] < img.shape[0] and center[1] < img.shape[1] and score > 0.9:
+            depth_val = depth[int(center[0])][int(center[1])]
+
+            img = cv.rectangle(img, (int(bbox_np[0]), int(bbox_np[1])), (int(bbox_np[2]), int(bbox_np[3])), (0,255,0), 3)
+
+            img =  cv.circle(img, (int(center[0]), int(center[1])), radius=0, color=(0,0,255), thickness=4)
+
+            result = rs2.rs2_deproject_pixel_to_point(intrinsics, [int(bbox_np[0]), int(bbox_np[1])], depth_val)
+            print(result)
+            results.append(result)
+
+    cv.imwrite("detected.jpg", img)
+    return np.asarray(results)
+    
+
+def get_yolo_position(data_params):
+    positions = []
+    ids = []
+    for i in range(100):
+        tmp_msg = data_params["pers_msgs"][i]
+        #print("detected persons header: ", tmp_msg.header)
+        tmp_ids = []
+        tmp_pos = []
+        for i in tmp_msg.detections:
+            tmp_ids.append(i.detection_id)
+            tmp_pos.append([i.pose.pose.position.x, i.pose.pose.position.y, i.pose.pose.position.z])
+
+        break
+    print(np.asarray(tmp_pos))
+    return np.asarray(tmp_pos)
+
+def visualise_pos(pos, y_pos):
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+
+    fig2 = plt.figure()
+    ax2 = fig2.add_subplot(projection='3d')
+
+    ax.scatter(pos[:,0], pos[:,1], pos[:,2], marker='o')
+    ax2.scatter(y_pos[:,0], y_pos[:,1], y_pos[:,2], marker='^')
+
+    ax.set_xlabel('X Label')
+    ax.set_ylabel('Y Label')
+    ax.set_zlabel('Z Label')
+
+    ax2.set_xlabel('X Label')
+    ax2.set_ylabel('Y Label')
+    ax2.set_zlabel('Z Label')
+
+
+    plt.show()
     
 
 
 
 if __name__ == "__main__":
 
-    path = os.path.join("/home/annalena/crowdbot-evaluation-tools/data/rosbags_03_12_manual-rgbd_defaced/", "defaced_2021-12-03-19-12-00.bag")
+    path = os.path.join("/home/pbr-student/personal/thesis/crowdbot/rosbags_25_03_shared_control-rgbd_defaced", "defaced_2021-03-25-14-52-33.bag")
     bag = bagreader(path).reader
 
     data_params = msgs(bag)
 
-    pcs = get_pointclouds(data_params)
+    yolo_pos = get_yolo_position(data_params)
 
-    #imgs, depths = get_frames(data_params)
+    #pcs = get_pointclouds(data_params)
+
+    imgs, depths = get_frames(data_params)
     #track(imgs)
-    #cameraInfo = get_camera_info(data_params)
-    #get_positions(imgs, depths, cameraInfo)
+    cameraInfo = get_camera_info(data_params)
+    pos = get_positions(imgs, depths, cameraInfo)
+
+    #visualise_pos(pos, yolo_pos)
