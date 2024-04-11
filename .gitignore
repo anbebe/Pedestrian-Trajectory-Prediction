@@ -162,7 +162,7 @@ cython_debug/
 #libraries
 mmdetection3d/
 Open3D-ML/
-message_filters/
+crowdbot-evaluation-tools/
 
 # logs, pointclouds and pretrained models
 logs/
