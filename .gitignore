@@ -163,8 +163,16 @@ cython_debug/
 mmdetection3d/
 Open3D-ML/
 crowdbot-evaluation-tools/
+FairMOT/
+examples/
+BoT-SORT/
+openpose/
 
 # logs, pointclouds and pretrained models
 logs/
 pcds/
 pretrained/
+
+# pickles and csv
+*.csv
+*.pkl
