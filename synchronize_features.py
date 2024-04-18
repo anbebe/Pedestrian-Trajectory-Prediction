@@ -4,10 +4,24 @@ import numpy as np
 import time
 from bagpy import bagreader
 import open3d as o3d
+import cv2 as cv
+from motpy import Detection, MultiObjectTracker
+import torch
+import numpy as np
+import pandas as pd
+import sys
+from matplotlib import pyplot as plt
+from tqdm import tqdm
 import sensor_msgs.point_cloud2 as pc2
+from rosbags.image import message_to_cvimage
 import pyrealsense2 as rs2
 if (not hasattr(rs2, 'intrinsics')):
     import pyrealsense2.pyrealsense2 as rs2
+pose_sample_rpi_path = os.path.join(os.getcwd(), 'examples/lite/examples/pose_estimation/raspberry_pi')
+sys.path.append(pose_sample_rpi_path)
+import utils
+from data import BodyPart
+from ml import Movenet
 
 def msgs(bag):
     """For extracting msgs from Rosbag reader
@@ -71,7 +85,8 @@ def create_img_data(msgs):
     img_msgs = []
     for i in msgs:
         timestamps.append(i.header.stamp.to_time())
-        img_msgs.append(i)
+        img = message_to_cvimage(i)
+        img_msgs.append(img)
     data = {"timestamps": np.array(timestamps), "img_msgs": img_msgs}
     return data
 
@@ -92,7 +107,13 @@ def pc_to_grid(tmp_msg):
     voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd,
                                                                 voxel_size=0.01)
     #o3d.visualization.draw_geometries([voxel_grid])
-    return voxel_grid
+    voxels = voxel_grid.get_voxels()  # returns list of voxels
+    indices = np.stack(list(vx.grid_index for vx in voxels))
+    voxel_coord = np.stack(list(voxel_grid.get_voxel_center_coordinate(vx) for vx in indices))
+    #print("voxel_coord: ", voxel_coord.shape)
+    #print("indices: ", indices)
+
+    return voxel_coord
 
 def create_vox_data(msgs):
     print("Get scene data")
@@ -122,11 +143,180 @@ def sync_data(d1,d2,d3):
 
     return merged_df
 
+
+def draw_boxes(frame, track_results, id_dict):
+    # Draw bounding boxes for tracked objects
+    for object in track_results:
+        #print("object: ", object)
+        x, y, w, h = object.box
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        object_id = object.id
+        confidence = object.score
+        cv.rectangle(frame, (x, y), (w, h), (0, 255, 0), 2)
+        cv.putText(frame, f"{str(id_dict[object_id])}: {str(round(confidence[0], 2))}", (x, y - 10), cv.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
+    cv.putText(frame, "People Count: {}".format(len(track_results)), (10, 30), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+
+def update_id_dict(id_dict, j, track_results):
+    # Update the dictionary with new object IDs and corresponding labels
+    for track_result in track_results:
+        if track_result.id not in id_dict:
+            id_dict[track_result.id] = j
+            j += 1
+    return id_dict, j
+
+def detect(movenet, input_tensor, inference_count=3):
+    """Runs detection on an input image.
+    
+    Args:
+        input_tensor: A [height, width, 3] Tensor of type tf.float32.
+        Note that height and width can be anything since the image will be
+        immediately resized according to the needs of the model within this
+        function.
+        inference_count: Number of times the model should run repeatly on the
+        same input image to improve detection accuracy.
+    
+    Returns:
+        A Person entity detected by the MoveNet.SinglePose.
+    """
+    image_height, image_width, channel = input_tensor.shape
+    
+    # Detect pose using the full input image
+    movenet.detect(input_tensor, reset_crop_region=True)
+    
+    # Repeatedly using previous detection result to identify the region of
+    # interest and only croping that region to improve detection accuracy
+    for _ in range(inference_count - 1):
+        person = movenet.detect(input_tensor, 
+                                reset_crop_region=False)
+
+    return person
+
+def draw_prediction_on_image(
+    image, person, crop_region=None, close_figure=True,
+    keep_input_size=False):
+    """Draws the keypoint predictions on image.
+
+    Args:
+    image: An numpy array with shape [height, width, channel] representing the
+        pixel values of the input image.
+    person: A person entity returned from the MoveNet.SinglePose model.
+    close_figure: Whether to close the plt figure after the function returns.
+    keep_input_size: Whether to keep the size of the input image.
+
+    Returns:
+    An numpy array with shape [out_height, out_width, channel] representing the
+    image overlaid with keypoint predictions.
+    """
+    # Draw the detection result on top of the image.
+    image_np = utils.visualize(image, [person])
+
+    # Plot the image with detection results.
+    height, width, channel = image.shape
+    aspect_ratio = float(width) / height
+    fig, ax = plt.subplots(figsize=(12 * aspect_ratio, 12))
+    im = ax.imshow(image_np)
+
+    if close_figure:
+        plt.close(fig)
+
+    if not keep_input_size:
+        image_np = utils.keep_aspect_ratio_resizer(image_np, (512, 512))
+
+    return image_np
+
+def get_pose2(movenet, frame, bbox):
+    #offset = 0
+    #cropped_img = frame.copy()[bbox[1]-offset:bbox[3]+offset, bbox[0]-offset:bbox[2]+offset]
+    cropped_img = frame.copy()[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+    cropped_img = np.asarray(cropped_img.copy(),dtype=np.uint8)
+    #cropped_img = frame.copy()
+    person = detect(movenet, cropped_img)
+
+    #print("detection result: ", person)
+    detections = []
+    if len(person.keypoints) > 0:
+        output_overlay = draw_prediction_on_image(
+              cropped_img.astype(np.uint8), person, 
+              close_figure=True, keep_input_size=True)
+        #output_frame = cv.cvtColor(output_overlay, cv.COLOR_RGB2BGR)
+        #plt.imshow(output_frame)
+        for keypoint in person.keypoints:
+            detections.append([keypoint.coordinate.x, keypoint.coordinate.y, keypoint.score])
+    return detections
+
+def update_dets(idx, track_res, id_dict, test_syn_data, movenet):
+    new_sync_data = test_syn_data.copy()
+    for i in range(len(test_syn_data["detections"][idx])):
+        obj = test_syn_data["detections"][idx][i]
+        conf, pos, bbox_orig = obj
+        x_min, y_min, w, h = bbox_orig
+        bbox_orig = np.array([int(x_min), int(y_min), int(x_min+w), int(y_min+h)])
+        # get bestimmt effizienter
+        for obj in track_res:
+            if np.array_equal(bbox_orig,obj.box):
+                # get pose from blazepose
+                poses = get_pose2(movenet, test_syn_data["img_msgs"][idx], bbox_orig)
+                id = id_dict[obj.id]
+                new_sync_data["detections"][idx][i] = [id, pos, bbox_orig, poses, conf]
+    return new_sync_data
+
+def track(sync_data, movenet):
+    test_syn_data = sync_data.copy().to_dict()
+    imgs = sync_data.iloc[:]["img_msgs"]
+
+    bboxes = []
+    scores = []
+    for d in sync_data.iloc[:]["detections"]:
+        bbox_d = []
+        scores_d = []
+        for i in d:
+            x_min, y_min, w, h = i[2]
+            bbox_d.append([int(x_min), int(y_min), int(x_min+w), int(y_min+h)])
+            scores_d.append([i[0]])
+        bboxes.append(bbox_d)
+        scores.append(scores_d)
+
+
+    # Initialize MultiObjectTracker
+    tracker = MultiObjectTracker(dt=1 / 15, tracker_kwargs={'max_staleness': 10})
+
+    # Initialize ID dictionary and counter
+    id_dict = {}
+    j = 0
+
+    for frame_id in tqdm(range(len(imgs))):
+
+        frame = np.asarray(imgs[frame_id].copy())
+
+        detections = []
+
+        # Pass YOLO detections to motpy
+        for coord, score in zip(bboxes[frame_id], scores[frame_id]):
+            detections.append(Detection(box=coord, score=score, class_id=25))
+
+        # Perform object tracking
+        tracker.step(detections=detections)
+        track_results = tracker.active_tracks()
+
+        # Update ID dictionary
+        id_dict, j = update_id_dict(id_dict, j, track_results)
+
+        #print(id_dict)
+        test_syn_data = update_dets(frame_id, track_results, id_dict, test_syn_data, movenet)
+
+        # Draw bounding boxes on frame
+        #draw_boxes(frame, track_results, id_dict)
+        #cv.imwrite('FRAME', frame)
+
+    return test_syn_data
+
+
 if __name__ == "__main__":
 
     start_time = time.time()
 
-    path = os.path.join("/home/pbr-student/personal/thesis/crowdbot/rosbags_25_03_shared_control-rgbd_defaced", "defaced_2021-03-25-14-52-33.orig.bag")
+    path = os.path.join("/home/pbr-student/personal/thesis/crowdbot/rosbags_0325_shared_control-rgbd_defaced", "defaced_2021-03-25-14-52-33.orig.bag")
     bag = bagreader(path).reader
 
     data_params = msgs(bag)
@@ -136,5 +326,20 @@ if __name__ == "__main__":
     vox_data = create_vox_data(data_params["pc_msgs"])
 
     sync_data = sync_data(detect_data, img_data, vox_data)
+    #sync_data.to_pickle("synced_data.pkl")
 
     print("--- %s seconds ---" % (time.time() - start_time))
+
+    # track persons and add id and pose
+
+    movenet = Movenet('pretrained/movenet_thunder')
+
+    full_data = track(sync_data, movenet)
+    print("--- %s seconds ---" % (time.time() - start_time))
+
+    full_data = pd.DataFrame.from_dict(full_data)
+    #full_data.to_csv('synced_full_data.csv', index=False)  
+    full_data.to_pickle('synced_full_data.pkl')
+
+
+
