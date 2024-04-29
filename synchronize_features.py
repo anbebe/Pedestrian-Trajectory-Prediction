@@ -6,7 +6,6 @@ from bagpy import bagreader
 import open3d as o3d
 import cv2 as cv
 from motpy import Detection, MultiObjectTracker
-import torch
 import numpy as np
 import pandas as pd
 import sys
@@ -20,7 +19,6 @@ if (not hasattr(rs2, 'intrinsics')):
 pose_sample_rpi_path = os.path.join(os.getcwd(), 'examples/lite/examples/pose_estimation/raspberry_pi')
 sys.path.append(pose_sample_rpi_path)
 import utils
-from data import BodyPart
 from ml import Movenet
 
 def msgs(bag):
@@ -109,11 +107,12 @@ def pc_to_grid(tmp_msg):
     #o3d.visualization.draw_geometries([voxel_grid])
     voxels = voxel_grid.get_voxels()  # returns list of voxels
     indices = np.stack(list(vx.grid_index for vx in voxels))
-    voxel_coord = np.stack(list(voxel_grid.get_voxel_center_coordinate(vx) for vx in indices))
+    #voxel_coord = np.stack(list(voxel_grid.get_voxel_center_coordinate(vx) for vx in indices))
     #print("voxel_coord: ", voxel_coord.shape)
     #print("indices: ", indices)
+    indices = np.stack(list(vx.grid_index for vx in voxels))[:,:2]
 
-    return voxel_coord
+    return indices
 
 def create_vox_data(msgs):
     print("Get scene data")
@@ -246,19 +245,22 @@ def get_pose2(movenet, frame, bbox):
     return detections
 
 def update_dets(idx, track_res, id_dict, test_syn_data, movenet):
-    new_sync_data = test_syn_data.copy()
+    new_sync_data = test_syn_data
     for i in range(len(test_syn_data["detections"][idx])):
         obj = test_syn_data["detections"][idx][i]
         conf, pos, bbox_orig = obj
         x_min, y_min, w, h = bbox_orig
         bbox_orig = np.array([int(x_min), int(y_min), int(x_min+w), int(y_min+h)])
         # get bestimmt effizienter
-        for obj in track_res:
-            if np.array_equal(bbox_orig,obj.box):
+        for obj_ in track_res:
+            track_box = obj_.box.astype(int)
+            if np.all(np.abs(bbox_orig - track_box) < 15 ):
                 # get pose from blazepose
+                #print(np.abs(bbox_orig - track_box))
                 poses = get_pose2(movenet, test_syn_data["img_msgs"][idx], bbox_orig)
-                id = id_dict[obj.id]
+                id = id_dict[obj_.id]
                 new_sync_data["detections"][idx][i] = [id, pos, bbox_orig, poses, conf]
+                break
     return new_sync_data
 
 def track(sync_data, movenet):
@@ -287,8 +289,6 @@ def track(sync_data, movenet):
 
     for frame_id in tqdm(range(len(imgs))):
 
-        frame = np.asarray(imgs[frame_id].copy())
-
         detections = []
 
         # Pass YOLO detections to motpy
@@ -312,6 +312,57 @@ def track(sync_data, movenet):
     return test_syn_data
 
 
+def draw_boxes(frame, detections):
+    # Draw bounding boxes for tracked objects
+    for object in detections:
+        if type(object[0])== int:
+            x, y, w, h = object[2]
+            x, y, w, h = int(x), int(y), int(w), int(h)
+            object_id = object[0]
+            confidence = object[-1]
+            frame = cv.rectangle(frame, (x, y), (w, h), (0, 255, 0), 2)
+            frame = cv.putText(frame, f"{str(object_id)}: {str(round(confidence, 2))}", (x, y - 10), cv.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
+    return frame
+
+# filter trajectories with enough detected keypoints and length of sequence
+def filter_detections_id_pose(df, index, row):
+    old_detections = row["detections"]
+    new_detections = []
+    for object in old_detections:
+        if type(object[0])== int:
+            object_id = object[0]
+            confidence = object[-1]
+            pose_kps = object[3]
+            pose_confs = np.asarray(pose_kps)[:,-1]
+            if len(np.argwhere(pose_confs > 0.5)) > 8 and not type(confidence) == list:
+                if confidence > 0.7:
+                    new_detections.append([object_id, object[1], object[2], pose_kps, object[4]])
+    df.update(pd.DataFrame({'detections': [new_detections]}, index=[index]))
+    return df
+
+def filter_seq_len(df):
+    ids = []
+    detections = df.iloc[:]["detections"]
+    all_ids = [x[0] for y in detections for x in y]
+    occurs_id, occurs_counts = np.unique(np.asarray(all_ids), return_counts=True)
+    occurs_idx = np.argwhere(occurs_counts>10) # TODO: parameter, gucekn wie viel übrig bleibt
+    ids = occurs_id[occurs_idx]
+    return np.squeeze(ids)
+
+def filter_ids(df, row, ids):
+    old_detections = row["detections"]
+    new_detections = []
+    for object in old_detections:
+        if np.isin(object[0], ids):
+            object_id = object[0]
+            confidence = object[-1]
+            pose_kps = object[3]
+            pose_confs = np.asarray(pose_kps)[:,-1]
+            new_detections.append([object_id, object[1], object[2], pose_kps, object[4]])
+    df.update(pd.DataFrame({'detections': [new_detections]}, index=[index]))
+    return df
+
+
 if __name__ == "__main__":
 
     start_time = time.time()
@@ -326,8 +377,6 @@ if __name__ == "__main__":
     vox_data = create_vox_data(data_params["pc_msgs"])
 
     sync_data = sync_data(detect_data, img_data, vox_data)
-    #sync_data.to_pickle("synced_data.pkl")
-
     print("--- %s seconds ---" % (time.time() - start_time))
 
     # track persons and add id and pose
@@ -338,7 +387,28 @@ if __name__ == "__main__":
     print("--- %s seconds ---" % (time.time() - start_time))
 
     full_data = pd.DataFrame.from_dict(full_data)
-    #full_data.to_csv('synced_full_data.csv', index=False)  
+
+    # filter trajectories by length and confidence in keypoints
+
+    for index, row in full_data.copy().iterrows():
+        full_data = filter_detections_id_pose(full_data, index, row)
+
+    keep_ids = filter_seq_len(full_data)
+
+    for index, row in full_data.iterrows():
+        full_data = filter_ids(full_data, row, keep_ids)
+
+    """
+    for index, row in full_data.iterrows():
+        img = row["img_msgs"].astype(np.uint8)
+        img = draw_boxes(img, row["detections"])
+        cv.imshow("frame", img)
+        cv.waitKey(50)
+
+    cv.destroyAllWindows()
+    """
+    
+
     full_data.to_pickle('synced_full_data.pkl')
 
 
