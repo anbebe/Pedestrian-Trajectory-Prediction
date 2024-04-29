@@ -173,6 +173,7 @@ logs/
 pcds/
 pretrained/
 
-# pickles and csv
+# data files
 *.csv
 *.pkl
+*.gif
