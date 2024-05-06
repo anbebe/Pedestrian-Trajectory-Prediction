@@ -60,6 +60,16 @@ def msgs(bag):
     return data_params
 
 def create_detection_data(msgs):
+    """ loads timestamps and corresponding detection data (confidence in detected bounding box, bounding box (x,y,w,h)
+    and 3d position) for possibly mutliple persons in one image
+
+    Args:
+        msgs: message from rosbag
+
+    Returns: 
+        dictionary with timestamps and detection data 
+        for each detected person: (confidence score, positionx, positiony, positionz, bboxx, bboxy, bboxw, bboxh)
+    """
     print("Get detection data")
     timestamps = []
     detections = []
@@ -78,6 +88,14 @@ def create_detection_data(msgs):
     return data
 
 def create_img_data(msgs):
+    """loads timestamps and corresponding images from message, converts images to usable matrixes
+
+    Args:
+        msgs: message from rosbag
+
+    Returns:
+        dictionary with timestamps and image data
+    """
     print("Get image data")
     timestamps = []
     img_msgs = []
@@ -89,32 +107,43 @@ def create_img_data(msgs):
     return data
 
 def pc_to_grid(tmp_msg):
+    """Loads points from rosbag message, ignores the z-axes to get a 2d grid and creates a VoxelGrid
+
+    Args:
+        tmp_msg: message
+
+    Returns:
+        indices of VoxelGrid voxels
+    """
     points_obj = pc2.read_points(tmp_msg, skip_nans=True, field_names=("x", "y", "z"))
     pc = np.array(list(points_obj), dtype=np.float32)
-    pc[:,2] = 0
-    #print(pc.shape)
+    # reduces points to 2 dimensions
+    pc[:,2] = 0 
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pc)
-    #print(len(pcd.points))
 
     # fit to unit cube
     pcd.scale(1 / np.max(pcd.get_max_bound() - pcd.get_min_bound()),
             center=pcd.get_center())
-    #o3d.visualization.draw_geometries([pcd])
     voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd,
                                                                 voxel_size=0.01)
-    #o3d.visualization.draw_geometries([voxel_grid])
     voxels = voxel_grid.get_voxels()  # returns list of voxels
     indices = np.stack(list(vx.grid_index for vx in voxels))
     #voxel_coord = np.stack(list(voxel_grid.get_voxel_center_coordinate(vx) for vx in indices))
-    #print("voxel_coord: ", voxel_coord.shape)
-    #print("indices: ", indices)
     indices = np.stack(list(vx.grid_index for vx in voxels))[:,:2]
 
     return indices
 
 def create_vox_data(msgs):
+    """loads timestamps and corresponding pointcloud data, reduces pointclouds to 2d voxelgrids 
+
+    Args:
+        msgs: message from rosbag
+
+    Returns:
+        returns dictionary with timestamps and voxelgrid data
+    """
     print("Get scene data")
     timestamps = []
     voxel_msgs = []
@@ -126,6 +155,16 @@ def create_vox_data(msgs):
     return data
 
 def sync_data(d1,d2,d3):
+    """Synchronize three datasets (dictionaries) by the timestamp key
+
+    Args:
+        d1: detection dataset
+        d2: image dataset
+        d3: scene dataset
+
+    Returns:
+        one dataframe with combined datasets by timestamo
+    """
     print("Synchronize data")
     pd.set_option('display.float_format', '{:.2f}'.format)
 
@@ -142,7 +181,6 @@ def sync_data(d1,d2,d3):
 
     return merged_df
 
-
 def draw_boxes(frame, track_results, id_dict):
     # Draw bounding boxes for tracked objects
     for object in track_results:
@@ -154,7 +192,6 @@ def draw_boxes(frame, track_results, id_dict):
         cv.rectangle(frame, (x, y), (w, h), (0, 255, 0), 2)
         cv.putText(frame, f"{str(id_dict[object_id])}: {str(round(confidence[0], 2))}", (x, y - 10), cv.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
     cv.putText(frame, "People Count: {}".format(len(track_results)), (10, 30), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
 
 def update_id_dict(id_dict, j, track_results):
     # Update the dictionary with new object IDs and corresponding labels
@@ -264,6 +301,17 @@ def update_dets(idx, track_res, id_dict, test_syn_data, movenet):
     return new_sync_data
 
 def track(sync_data, movenet):
+    """Uses Multiobject Tracker and Movenet to update detection information through all timestamps;
+    Tracks persons with unique ids by given bounding boxes and detects keypoints poses with movenet on
+    cropped images (from bounding boxes)
+
+    Args:
+        sync_data: pandas dataframe with synchronized image, detection and scene data
+        movenet: pretrained and instantiated movenet model
+
+    Returns:
+        updated dictionary (no pandas dataframe) 
+    """
     test_syn_data = sync_data.copy().to_dict()
     imgs = sync_data.iloc[:]["img_msgs"]
 
@@ -302,15 +350,10 @@ def track(sync_data, movenet):
         # Update ID dictionary
         id_dict, j = update_id_dict(id_dict, j, track_results)
 
-        #print(id_dict)
         test_syn_data = update_dets(frame_id, track_results, id_dict, test_syn_data, movenet)
 
-        # Draw bounding boxes on frame
-        #draw_boxes(frame, track_results, id_dict)
-        #cv.imwrite('FRAME', frame)
 
     return test_syn_data
-
 
 def draw_boxes(frame, detections):
     # Draw bounding boxes for tracked objects
@@ -324,8 +367,17 @@ def draw_boxes(frame, detections):
             frame = cv.putText(frame, f"{str(object_id)}: {str(round(confidence, 2))}", (x, y - 10), cv.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
     return frame
 
-# filter trajectories with enough detected keypoints and length of sequence
 def filter_detections_id_pose(df, index, row):
+    """filter trajectories with enough detected keypoints and length of sequence
+
+    Args:
+        df: synchronized dataframe
+        index: index of row
+        row: row of dataset
+
+    Returns:
+        updated dataframe
+    """
     old_detections = row["detections"]
     new_detections = []
     for object in old_detections:
@@ -334,6 +386,7 @@ def filter_detections_id_pose(df, index, row):
             confidence = object[-1]
             pose_kps = object[3]
             pose_confs = np.asarray(pose_kps)[:,-1]
+            # if half of the keypoints are detected with enough confidence, the person is kept
             if len(np.argwhere(pose_confs > 0.5)) > 8 and not type(confidence) == list:
                 if confidence > 0.7:
                     new_detections.append([object_id, object[1], object[2], pose_kps, object[4]])
@@ -341,15 +394,33 @@ def filter_detections_id_pose(df, index, row):
     return df
 
 def filter_seq_len(df):
+    """Get all persons (ids) that occur at least 10 times in the sequence
+
+    Args:
+        df: synchronized dataframe
+
+    Returns:
+        ids to keep
+    """
     ids = []
     detections = df.iloc[:]["detections"]
     all_ids = [x[0] for y in detections for x in y]
     occurs_id, occurs_counts = np.unique(np.asarray(all_ids), return_counts=True)
-    occurs_idx = np.argwhere(occurs_counts>10) # TODO: parameter, gucekn wie viel übrig bleibt
+    occurs_idx = np.argwhere(occurs_counts>20) # TODO: parameter, gucken wie viel übrig bleibt
     ids = occurs_id[occurs_idx]
     return np.squeeze(ids)
 
 def filter_ids(df, row, ids):
+    """Filters the dataframe, to keep only detections of persons with specific ids
+
+    Args:
+        df: synchronized dataframe
+        row: row 
+        ids: ids to keep 
+
+    Returns:
+        updated dataframe
+    """
     old_detections = row["detections"]
     new_detections = []
     for object in old_detections:
@@ -366,8 +437,8 @@ def filter_ids(df, row, ids):
 if __name__ == "__main__":
 
     start_time = time.time()
+    path = os.path.join("/home/pbr-student/personal/thesis/crowdbot/rosbags_10_04_mds-rgbd_defaced", "defaced_2021-04-10-11-56-56-001.bag")
 
-    path = os.path.join("/home/pbr-student/personal/thesis/crowdbot/rosbags_0325_shared_control-rgbd_defaced", "defaced_2021-03-25-14-52-33.orig.bag")
     bag = bagreader(path).reader
 
     data_params = msgs(bag)
@@ -380,7 +451,7 @@ if __name__ == "__main__":
     print("--- %s seconds ---" % (time.time() - start_time))
 
     # track persons and add id and pose
-
+    
     movenet = Movenet('pretrained/movenet_thunder')
 
     full_data = track(sync_data, movenet)
@@ -388,7 +459,7 @@ if __name__ == "__main__":
 
     full_data = pd.DataFrame.from_dict(full_data)
 
-    # filter trajectories by length and confidence in keypoints
+    # filter trajectories by length and confidence in keypoints 
 
     for index, row in full_data.copy().iterrows():
         full_data = filter_detections_id_pose(full_data, index, row)
@@ -398,18 +469,9 @@ if __name__ == "__main__":
     for index, row in full_data.iterrows():
         full_data = filter_ids(full_data, row, keep_ids)
 
-    """
-    for index, row in full_data.iterrows():
-        img = row["img_msgs"].astype(np.uint8)
-        img = draw_boxes(img, row["detections"])
-        cv.imshow("frame", img)
-        cv.waitKey(50)
+    # save data as pickle file    """
 
-    cv.destroyAllWindows()
-    """
-    
-
-    full_data.to_pickle('synced_full_data.pkl')
+    sync_data.to_pickle('synced_full_data.pkl')
 
 
 
