@@ -31,11 +31,13 @@ def msgs(bag):
     topic_list = [
         "/camera_left/color/image_raw",
         "/detected_persons/yolo",
-        "/front_lidar/velodyne_points"
+        "/front_lidar/velodyne_points",
+        "/t265/odom/sample"
     ]
     image_msgs = []
     pc_msgs = []
     pers_msgs = []
+    odom_msgs = []
 
     for topic, msg, t in bag.read_messages(topics=topic_list):
         
@@ -48,6 +50,9 @@ def msgs(bag):
         if topic == "/front_lidar/velodyne_points":
             pc_msgs.append(msg)
 
+        if topic == "/t265/odom/sample":
+            odom_msgs.append(msg)
+
 
     bag.close()
 
@@ -55,6 +60,7 @@ def msgs(bag):
         "image_msgs": image_msgs,
         "pc_msgs": pc_msgs,
         "pers_msgs": pers_msgs,
+        "odom_msgs": odom_msgs,
     }
 
     return data_params
@@ -154,7 +160,18 @@ def create_vox_data(msgs):
     data = {"timestamps": np.array(timestamps), "vox_msgs": voxel_msgs}
     return data
 
-def sync_data(d1,d2,d3):
+def create_odom_data(msgs):
+    timestamps = []
+    odoms = []
+    for i in msgs:
+        timestamps.append(i.header.stamp.to_time())
+        # odometry: twist linear x,y,z, twist angular x,y,z
+        odom = np.asarray([i.twist.twist.linear.x, i.twist.twist.linear.y, i.twist.twist.linear.z, i.twist.twist.angular.x, i.twist.twist.angular.y, i.twist.twist.angular.z])
+        odoms.append(odom)
+    data = {"timestamps": np.array(timestamps), "odoms": odoms}
+    return data
+
+def synchronize_data(d1,d2,d3,d4):
     """Synchronize three datasets (dictionaries) by the timestamp key
 
     Args:
@@ -171,13 +188,16 @@ def sync_data(d1,d2,d3):
     df_pers = pd.DataFrame.from_dict(data=d1)
     df_img = pd.DataFrame.from_dict(data=d2)
     df_vox = pd.DataFrame.from_dict(data=d3)
+    df_odom = pd.DataFrame.from_dict(data=d4)
 
     df_pers.sort_values(by="timestamps",inplace=True)
     df_img.sort_values(by="timestamps",inplace=True)
     df_vox.sort_values(by="timestamps", inplace=True)
+    df_odom.sort_values(by="timestamps", inplace=True)
 
     merged_df = pd.merge_asof(df_pers, df_img, on="timestamps", direction="nearest")
     merged_df = pd.merge_asof(merged_df, df_vox, on="timestamps", direction="nearest")
+    merged_df = pd.merge_asof(merged_df, df_odom, on="timestamps", direction="nearest")
 
     return merged_df
 
@@ -410,7 +430,7 @@ def filter_seq_len(df):
     ids = occurs_id[occurs_idx]
     return np.squeeze(ids)
 
-def filter_ids(df, row, ids):
+def filter_ids(df, row, ids, index):
     """Filters the dataframe, to keep only detections of persons with specific ids
 
     Args:
@@ -434,10 +454,10 @@ def filter_ids(df, row, ids):
     return df
 
 
-if __name__ == "__main__":
+def rosbag_to_tracks(file, path):
 
     start_time = time.time()
-    path = os.path.join("/home/pbr-student/personal/thesis/crowdbot/rosbags_10_04_mds-rgbd_defaced", "defaced_2021-04-10-11-56-56-001.bag")
+    path = os.path.join(path, file)
 
     bag = bagreader(path).reader
 
@@ -446,8 +466,9 @@ if __name__ == "__main__":
     detect_data = create_detection_data(data_params["pers_msgs"])
     img_data = create_img_data(data_params["image_msgs"])
     vox_data = create_vox_data(data_params["pc_msgs"])
+    odom_data = create_odom_data(data_params["odom_msgs"])
 
-    sync_data = sync_data(detect_data, img_data, vox_data)
+    sync_data = synchronize_data(detect_data, img_data, vox_data, odom_data)
     print("--- %s seconds ---" % (time.time() - start_time))
 
     # track persons and add id and pose
@@ -467,11 +488,15 @@ if __name__ == "__main__":
     keep_ids = filter_seq_len(full_data)
 
     for index, row in full_data.iterrows():
-        full_data = filter_ids(full_data, row, keep_ids)
+        full_data = filter_ids(full_data, row, keep_ids, index)
 
     # save data as pickle file    """
+    filename = os.path.basename(path)
+    new_filename = "synced_data/" + filename + ".pkl"
 
-    sync_data.to_pickle('synced_full_data.pkl')
+    sync_data.to_pickle(new_filename)
+
+    return sync_data
 
 
 

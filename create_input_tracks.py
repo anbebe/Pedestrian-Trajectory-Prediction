@@ -53,17 +53,19 @@ def pad_voxelgrids(voxel_list):
     return np.asarray(voxels)
     
 
-def filter_tracks(curr_id, sync_data, extractor):
+def filter_tracks(curr_id, sync_data, extractor, counter):
     imgs = [] # no necessary feature, only for filtering
     voxs = []
     positions = []
     poses = []
+    odoms = []
 
     track_dict = {}
 
     for index, row in sync_data.iterrows():
         img = row["img_msgs"].astype(np.uint8)
         voxel_grid = row["vox_msgs"]
+        odom = row["odoms"]
         for object in row["detections"]:
             if type(object[0])== int:
                 if object[0] == curr_id:
@@ -80,25 +82,28 @@ def filter_tracks(curr_id, sync_data, extractor):
                         if m < 0.6 and cos > 0.8:
                             imgs.append(cropped_img)
                             voxs.append(voxel_grid)
+                            odoms.append(odom)
                             positions.append(object[1])
                             poses.append(object[3])
                     else:
                         imgs.append(pad_img(cropped_img))
 
+    track_dict["id"] = str(counter) + "_" + str(int(curr_id)) 
     track_dict["voxelgrids"] = np.asarray(pad_voxelgrids(voxs))
     track_dict["positions"] = np.asarray(positions)
     track_dict["poses"] = np.asarray(poses)
+    track_dict["odoms"] = np.asarray(odoms)
 
 
 
     if len(imgs) > 10:
-        path = "animations/animations_" + str(curr_id) + ".gif"
+        path = "animations/" + str(counter) + "_" + str(int(curr_id))  + ".gif"
         imageio.mimsave(path, imgs, duration=len(imgs))
     
     return track_dict
 
 
-def get_single_tracks(sync_data):
+def get_single_tracks(sync_data, counter):
     detections = sync_data.iloc[:]["detections"]
     all_ids = [x[0] for y in detections for x in y]
     occurs_id, occurs_counts = np.unique(np.asarray(all_ids), return_counts=True)
@@ -109,7 +114,7 @@ def get_single_tracks(sync_data):
     )
     tracks = []
     for i in tqdm(range(len(occurs_id))):
-        track = filter_tracks(occurs_id[i], sync_data, extractor)
+        track = filter_tracks(occurs_id[i], sync_data, extractor, counter)
         if len(track["voxelgrids"]) > 10:
             tracks.append(track)
     
@@ -122,11 +127,13 @@ def get_single_tracks(sync_data):
 if __name__ == "__main__":
 
     # load pickle
-    sync_data = pd.read_pickle("synced_data/data_2021-04-10-11-28-10-009.pkl")
-    tracks = get_single_tracks(sync_data)
+    sync_data = pd.read_pickle("synced_data/data_2021-04-24-13-27-09.pkl")
     
-    print(tracks)
+    
+    tracks = get_single_tracks(sync_data)
 
     track_df = pd.DataFrame.from_dict(tracks)
+    old_track = pd.read_pickle('full_tracks.pkl')
+    track_df = pd.concat([old_track, track_df], axis=0)
     track_df.to_pickle('full_tracks.pkl')
 
