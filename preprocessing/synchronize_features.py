@@ -67,7 +67,7 @@ def msgs(bag):
 
 def create_detection_data(msgs):
     """ loads timestamps and corresponding detection data (confidence in detected bounding box, bounding box (x,y,w,h)
-    and 3d position) for possibly mutliple persons in one image
+    and 3d position) for possibly multiple persons in one image
 
     Args:
         msgs: message from rosbag
