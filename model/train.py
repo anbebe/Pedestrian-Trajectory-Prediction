@@ -13,21 +13,30 @@ def build_model():
     input_2 = tf.keras.Input(shape=(input_length, input_dim_2))
 
     hidden_size = 128
-    masked_inputs, mask = PreprocessLayer()((input_1, input_2)) # output shape (batch_size, 15, 3)
+    masked_inputs, mask, targets = PreprocessLayer()((input_1, input_2)) # output shape (batch_size, 15, 3)
   
-    encoded_agent, scores = FeatureAttnAgentEncoderLearnedLayer(input_length=input_length)((masked_inputs, mask))
-    self_encoded_agent, scores2 = AgentSelfAlignmentLayer()((encoded_agent, mask))
-    transformed1, scores3 = SelfAttnTransformerLayer(mask=True)((self_encoded_agent, mask))
-    transformed2, scores4 = SelfAttnTransformerLayer(mask=True)((transformed1, mask))
+    encoded_agent, _ = FeatureAttnAgentEncoderLearnedLayer(input_length=input_length)((masked_inputs, mask))
+    self_encoded_agent, _ = AgentSelfAlignmentLayer()((encoded_agent, mask))
+    transformed1, _ = SelfAttnTransformerLayer(mask=True)((self_encoded_agent, mask))
+    transformed2, _ = SelfAttnTransformerLayer(mask=True)((transformed1, mask))
     transformed3, logits = MultimodalityInduction()((transformed2, mask))
-    transformed4, scores5 = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)((transformed3, mask))
-    transformed5, scores6 = SelfAttnModeTransformerLayer()(transformed4)
-    transformed6, scores7 = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)((transformed5, mask))
-    transformed7, scores8 = SelfAttnModeTransformerLayer()(transformed6)
+    transformed4, _ = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)((transformed3, mask))
+    transformed5, _ = SelfAttnModeTransformerLayer()(transformed4)
+    transformed6, _ = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)((transformed5, mask))
+    transformed7, _ = SelfAttnModeTransformerLayer()(transformed6)
     pred = Prediction2DPositionHeadLayer()(transformed7)
+    
+    output_dict = {
+        'mask': mask,
+        'position': pred[...,0:3],
+        'position_raw_scale': pred[...,3:],
+        'mixture_logits': logits,
+        'targets': targets
+    }
 
 
-    model = tf.keras.Model(inputs=(input_1, input_2), outputs=pred)
+    model = tf.keras.Model(inputs=(input_1, input_2), outputs=output_dict)
+
     return model
 
 def train_model(data_path):

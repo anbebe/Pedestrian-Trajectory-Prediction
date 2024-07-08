@@ -7,34 +7,40 @@ class PreprocessLayer(tf.keras.layers.Layer):
     """ Applies the masking to the sequence
     """
 
-    def calc_hidden_mask(self, dataset):
+    def calc_hidden_mask(self, batch_size=32, sequence_length=15):
         # create mask array, False = needs to be predicted
-        sequence_length = 15
         mask_arrays = []
-        mask_arr = [True] * 6 + [False] * 9
-        # hide 0-2 in between steps (for lazyness whole datapoint)
-        hidden_nr = np.random.randint(3)
-        hidden_idx = np.random.choice(range(6),hidden_nr, replace=False)
-        for v in hidden_idx:
-            mask_arr[v] = False
-        print(np.asarray(mask_arr).shape)
-        return np.asarray(mask_arr)
+        print("batch_size:", batch_size)
+        print("sequence_length:", sequence_length)
+        for i in range(batch_size):
+          mask_arr = [True] * 6 + [False] * (sequence_length-6)
+          # hide 0-2 in between steps (for lazyness whole datapoint)
+          hidden_nr = np.random.randint(3)
+          hidden_idx = np.random.choice(range(6),hidden_nr, replace=False)
+          for v in hidden_idx:
+              mask_arr[v] = False
+          mask_arrays.append(mask_arr)
+        print("mask aaray:", np.asarray(mask_arrays).shape)
+        return np.asarray(mask_arrays)
 
     def call(self,
            raw_input_batch: Tuple[tf.Tensor, tf.Tensor],
            is_hidden: Optional[tf.Tensor] = None) -> Tuple[Tuple[tf.Tensor, tf.Tensor], tf.Tensor]:
         input_batch = raw_input_batch
-        mask = self.calc_hidden_mask(input_batch) #tf.convert_to_tensor
-        mask_tensor = tf.constant(mask, dtype=tf.bool)
+  
 
         batch_size = tf.shape(input_batch[0])[0]
         sequence_length = tf.shape(input_batch[0])[1]
         feature_size1 = tf.shape(input_batch[0])[2]
         feature_size2 = tf.shape(input_batch[1])[2]
 
+        mask = self.calc_hidden_mask() #tf.convert_to_tensor
+
+        mask_tensor = tf.constant(mask, dtype=tf.bool)
+
         # Expand dimensions of mask to match the input tensor
-        expanded_mask = tf.expand_dims(mask_tensor, axis=0)  # Add batch dimension
-        expanded_mask = tf.expand_dims(expanded_mask, axis=-1)  # Add feature dimension
+        #expanded_mask = tf.expand_dims(mask_tensor, axis=0)  # Add batch dimension
+        expanded_mask = tf.expand_dims(mask_tensor, axis=-1)  # Add feature dimension
 
         # Broadcast mask to match input tensor shape
         broadcasted_mask_pos = tf.broadcast_to(expanded_mask, (batch_size, sequence_length, feature_size1))
@@ -45,8 +51,9 @@ class PreprocessLayer(tf.keras.layers.Layer):
         # Apply mask
         masked_input_pos = tf.where(broadcasted_mask_pos, input_batch[0], tf.zeros_like(input_batch[0]))
         masked_input_pose = tf.where(broadcasted_mask_pose, input_batch[1], tf.zeros_like(input_batch[1]))
+        targets = tf.where(tf.math.logical_not(broadcasted_mask_pos), input_batch[0], tf.zeros_like(input_batch[0]))
 
-        return (masked_input_pos, masked_input_pose), mask 
+        return (masked_input_pos, masked_input_pose), mask, targets
 
 """ Adapted Sinusoidal Embedding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/embedding.py    """
 class SinusoidalEmbeddingLayer(tf.keras.layers.Layer):
@@ -252,12 +259,11 @@ class FeatureAttnAgentEncoderLearnedLayer(tf.keras.layers.Layer):
 
     attention_mask = tf.where(mask, 1, 0)
     attention_mask = tf.cast(attention_mask, dtype=tf.float32)
-    attention_mask = tf.expand_dims(attention_mask, axis=0)
+    attention_mask = tf.expand_dims(attention_mask, axis=-1)
     batch_size = tf.shape(input_batch[0])[0]
     attention_mask = tf.broadcast_to(attention_mask, (batch_size, self.input_length, self.input_length))
     attention_mask = tf.expand_dims(attention_mask, axis=1)  # Shape: (batch_size, 1, seq_len, seq_len)
     attention_mask = tf.repeat(attention_mask, self.num_heads, axis=1)  # Shape: (batch_size, num_heads, seq_len, seq_len)
-    #print("attention_mask shape: ", attention_mask.shape)
     
     learned_query = self._build_learned_query(input_batch)
     #print("learned_query shape: ", learned_query.shape)
@@ -342,7 +348,7 @@ class AgentSelfAlignmentLayer(tf.keras.layers.Layer):
     
     attention_mask = tf.where(mask, 1, 0)
     attention_mask = tf.cast(attention_mask, dtype=tf.float32)
-    attention_mask = tf.expand_dims(attention_mask, axis=0)
+    attention_mask = tf.expand_dims(attention_mask, axis=-1)
     batch_size = tf.shape(hidden_vecs)[0]
     input_length = tf.shape(hidden_vecs)[1]
     attention_mask = tf.broadcast_to(attention_mask, (batch_size, input_length, input_length))
@@ -438,7 +444,7 @@ class SelfAttnTransformerLayer(tf.keras.layers.Layer):
     else:
       attention_mask = tf.where(mask, 1, 0)
       attention_mask = tf.cast(attention_mask, dtype=tf.float32)
-      attention_mask = tf.expand_dims(attention_mask, axis=0)
+      attention_mask = tf.expand_dims(attention_mask, axis=-1)
       batch_size = tf.shape(hidden_vecs)[0]
       input_length = tf.shape(hidden_vecs)[1]
       attention_mask = tf.broadcast_to(attention_mask, (batch_size, input_length, input_length))
@@ -634,7 +640,7 @@ class Prediction2DPositionHeadLayer(tf.keras.layers.Layer):
     self.dense_layers.append(
         tf.keras.layers.EinsumDense(
             '...h,hf->...f',
-            output_shape=5,
+            output_shape=9,
             bias_axes='f',
             activation=None))
 
