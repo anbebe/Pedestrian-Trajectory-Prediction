@@ -161,6 +161,7 @@ class MinNLLPositionLoss(PositionNLLLoss):
 
     return position_nll_min_ade
 
+# used for JRDB and Pedestrians
 class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
   """Categorical Corssentropy Loss for Mixture Weight."""
 
@@ -248,3 +249,60 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
     }
     return loss_dict
   
+
+# used for JRDB Challenge
+class MultimodalPositionNLLLoss(Loss):
+  """Position loss for human trajectory predictions w/ scene transformer."""
+
+  def __init__(self, **kwargs):
+    super().__init__(name='position', **kwargs)
+
+  # from model.output_distributions
+  def force_positive(self, x, eps=1e-6):
+    return tf.keras.activations.elu(x) + 1. + eps
+
+  # from model.output_distributions
+  def to_positive_definite_scale_tril(self, logit_sigma):
+    tril = tfp.math.fill_triangular(logit_sigma)
+    scale_tril = tf.linalg.set_diag(
+        tril,
+        self.force_positive(tf.linalg.diag_part(tril)))
+    return scale_tril
+
+  # from model.output_distributions
+  def get_position_distribution(self, model_output):
+    """Multivariate Normal distribution over position."""
+    p_pos = tfp.distributions.MultivariateNormalTriL(
+        loc=model_output['position'],
+        scale_tril=self.to_positive_definite_scale_tril(
+            model_output['position_raw_scale']))
+    return p_pos
+
+  # from model.output_distributions
+  def get_multimodal_position_distribution(self, model_output):
+    """Multivariate Normal Mixture distribution over position."""
+    p_pos = self.get_position_distribution(model_output)
+
+    p_pos_mm = tfp.distributions.MixtureSameFamily(
+        mixture_distribution=tfp.distributions.Categorical(
+            logits=model_output['mixture_logits']),
+        components_distribution=p_pos)
+
+    return p_pos_mm
+
+  def get_per_batch_loss(self, input_batch, predictions):
+    """Negative log probability of ground truth with respect to predictions."""
+    # [b, a, t, n, 3]
+    p_position_mm = self.get_multimodal_position_distribution(
+        predictions)
+
+    target = predictions['targets']
+    print("target: ", target)
+    target = target[..., :p_position_mm.event_shape_tensor()[0]]
+    print("target: ", target)
+
+    # [b, a, t]
+    position_nll = -p_position_mm.log_prob(target)
+    print("position_nll: ", position_nll)
+
+    return position_nll

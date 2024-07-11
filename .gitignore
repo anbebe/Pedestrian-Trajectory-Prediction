@@ -177,3 +177,4 @@ pretrained/
 *.csv
 *.pkl
 *.gif
+*.bag
