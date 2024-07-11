@@ -49,21 +49,22 @@ class ADE(tf.keras.metrics.Metric):
 
   def update_state(self, input_batch, predictions):
     should_predict = tf.cast(tf.math.logical_not(predictions['mask']), tf.float32)
-    print("should_predict: ", should_predict.shape)
+    should_predict = tf.expand_dims(should_predict, axis=-1)
+    #print("should_predict: ", should_predict.shape)
 
     target = predictions['targets']
     target = target[..., :predictions['position'].shape[-1]]
-    print("target: ", target.shape)
+    #print("target: ", target.shape)
     # [b, a, t, n, 3] -> [b, a, t, n, 1]
     per_position_ade = distance_error(
         target[..., tf.newaxis, :],
         predictions['position'])
-    print("per_position_ade: ", per_position_ade.shape)
+    #print("per_position_ade: ", per_position_ade.shape)
 
     # Non-observed or past should not contribute to ade.
     deviation = tf.math.multiply_no_nan(per_position_ade,
                                         should_predict[..., tf.newaxis, :])
-    print("deviation: ", deviation.shape)
+    #print("deviation: ", deviation.shape)
     # Chop off the un-wanted time part.
     # [b, a, cutoff_idx, 1]
     if self.at_cutoff and self.cutoff_seconds is not None:
@@ -73,18 +74,18 @@ class ADE(tf.keras.metrics.Metric):
     else:
       deviation = deviation[:, :self.cutoff_idx, :]
       num_predictions = tf.reduce_sum(should_predict[:, :self.cutoff_idx, :])
-    print("deviation: ", deviation.shape)
-    print("num_predictions: ", num_predictions.shape)
+    #print("deviation: ", deviation.shape)
+    #print("num_predictions: ", num_predictions.shape)
     
     # Reduce along time
     deviation = tf.reduce_sum(deviation, axis=1)
-    print("deviation: ", deviation.shape)
+    #print("deviation: ", deviation.shape)
     # Reduce along modes
     deviation = self._reduce(deviation, input_batch, predictions)
-    print("deviation: ", deviation.shape)
+    #print("deviation: ", deviation.shape)
     # [1]
     deviation = tf.reduce_sum(deviation)
-    print("deviation: ", deviation.shape)
+    #print("deviation: ", deviation.shape)
 
     self.num_predictions.assign_add(num_predictions)
     self.total_deviation.assign_add(deviation)
@@ -110,11 +111,14 @@ class MLADE(ADE):
     # [b, a=1, t=1, n]
     ml_indices = tf.math.argmax(predictions['mixture_logits'], axis=-1)
     a = ade_with_modes.shape[1]
-    ml_indices = tf.tile(
-        tf.squeeze(ml_indices, axis=1), [1, a])[..., tf.newaxis]
+    #ml_indices = tf.tile(
+        #tf.squeeze(ml_indices, axis=1), [1, a])[..., tf.newaxis]
+    ml_indices = tf.squeeze(ml_indices, axis=1)
 
+    #return tf.gather(
+       # ade_with_modes, indices=ml_indices, batch_dims=1, axis=-2)[..., 0, :]
     return tf.gather(
-        ade_with_modes, indices=ml_indices, batch_dims=2, axis=-2)[..., 0, :]
+            ade_with_modes, indices=ml_indices[:, tf.newaxis], batch_dims=1, axis=-2)[..., 0]
 
 def force_positive(x, eps=1e-6):
   return tf.keras.activations.elu(x) + 1. + eps
@@ -179,18 +183,19 @@ class PositionNegativeLogLikelihood(tf.keras.metrics.Metric):
 
   def update_state(self, input_batch, predictions):
     should_predict = tf.cast(tf.math.logical_not(predictions['mask']), tf.float32)
-    print("should_predict: ", should_predict.shape)
+    should_predict = tf.expand_dims(should_predict, axis=-1)
+    #print("should_predict: ", should_predict.shape)
 
     p_pos = get_multimodal_position_distribution(predictions)
-    print("p_pos: ", p_pos.shape)
+    #print("p_pos: ", p_pos.shape)
 
-    target = input_batch['targets']
+    target = predictions['targets']
     target = target[..., :p_pos.event_shape_tensor()[0]]
     print(target.shape)
 
     # [b, a, t, n, 1]
     per_position_nll = -p_pos.log_prob(target)[..., tf.newaxis]
-    print("per_position_nll: ", per_position_nll)
+    #print("per_position_nll: ", per_position_nll)
 
     # Non-observed or past should not contribute to metric.
     nll = tf.math.multiply_no_nan(per_position_nll, should_predict)
@@ -203,12 +208,12 @@ class PositionNegativeLogLikelihood(tf.keras.metrics.Metric):
     else:
       nll = nll[:, :self.cutoff_idx, :]
       num_predictions = tf.reduce_sum(should_predict[:, :self.cutoff_idx, :])
-    print("nll: ", nll.shape)
-    print("num_predictions: ", num_predictions)
+    #print("nll: ", nll.shape)
+    #print("num_predictions: ", num_predictions)
 
     # [1]
     nll = tf.reduce_sum(nll)
-    print("nll: ", nll.shape)
+    #print("nll: ", nll.shape)
 
     self.num_predictions.assign_add(num_predictions)
     self.total_deviation.assign_add(nll)

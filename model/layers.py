@@ -7,11 +7,14 @@ class PreprocessLayer(tf.keras.layers.Layer):
     """ Applies the masking to the sequence
     """
 
+    def __init__(self):
+      super().__init__()
+
     def calc_hidden_mask(self, batch_size=32, sequence_length=15):
         # create mask array, False = needs to be predicted
         mask_arrays = []
-        print("batch_size:", batch_size)
-        print("sequence_length:", sequence_length)
+        #print("batch_size:", batch_size)
+        #print("sequence_length:", sequence_length)
         for i in range(batch_size):
           mask_arr = [True] * 6 + [False] * (sequence_length-6)
           # hide 0-2 in between steps (for lazyness whole datapoint)
@@ -20,7 +23,7 @@ class PreprocessLayer(tf.keras.layers.Layer):
           for v in hidden_idx:
               mask_arr[v] = False
           mask_arrays.append(mask_arr)
-        print("mask aaray:", np.asarray(mask_arrays).shape)
+        #print("mask aaray:", np.asarray(mask_arrays).shape)
         return np.asarray(mask_arrays)
 
     def call(self,

@@ -28,6 +28,7 @@ class Loss(object):
         self.clip_loss_max)
 
     # Compute loss only on positions w/ should_predict == True.
+    #print("should predict Loss:", should_predict.shape)
     should_predict_ind = tf.where(should_predict)
     loss_should_predict_mat = tf.gather_nd(
         params=loss_per_batch, indices=should_predict_ind)
@@ -53,19 +54,19 @@ class MinNLLPositionMixtureCategoricalCrossentropyLoss(Loss):
   def __init__(self, **kwargs):
     super().__init__(name='MinNLLMixture', **kwargs)
     self.position_loss_obj = MinNLLPositionLoss()
-    self.mixture_loss_obj = MinNLLMixtureCategoricalCrossentropyLoss()
+    #self.mixture_loss_obj = MinNLLMixtureCategoricalCrossentropyLoss()
 
   def call(self, input_batch, predictions):
     position_loss = self.position_loss_obj(input_batch, predictions)
     print("position loss: ", position_loss)
-    mixture_loss = self.mixture_loss_obj(input_batch, predictions)
-    print("mixture loss: ", mixture_loss)
+    #mixture_loss = self.mixture_loss_obj(input_batch, predictions)
+    #print("mixture loss: ", mixture_loss)
 
-    loss = position_loss['loss'] + mixture_loss['loss']
+    loss = position_loss['loss'] #+ mixture_loss['loss']
 
-    print("loss: ", loss)
+    #print("loss: ", loss)
 
-    loss_dict = {**position_loss, **mixture_loss}
+    loss_dict = {**position_loss}#, **mixture_loss}
 
     loss_dict['loss'] = loss
 
@@ -134,24 +135,29 @@ class MinNLLPositionLoss(PositionNLLLoss):
     per_position_nll = (
         position_nll[..., tf.newaxis] * should_predict[..., tf.newaxis, :]
     )
+    #print("per_position_nll ", per_position_nll.shape)
 
     # Get mode with minimum NLL
     # [b, a, n, 1]
-    per_mode_nll_sum = tf.reduce_sum(per_position_nll, axis=2)
+    per_mode_nll_sum = tf.reduce_sum(per_position_nll, axis=1)
+    #print("per_mode_nll_sum ", per_mode_nll_sum.shape)
 
-    t = tf.shape(position_nll)[2]
+    t = tf.shape(position_nll)[1]
 
     # [b, a, 1]
     min_nll_indices = tf.math.argmin(per_mode_nll_sum, axis=-2)
+    #print("min_nll_indices ", min_nll_indices.shape)
 
     # [b, a, t, 1]
     min_nll_indices_tiled = tf.tile(
         min_nll_indices[..., tf.newaxis], [1, t, 1])
+    #print("min_nll_indices_tiled ", min_nll_indices_tiled.shape)
 
     # [b, a, t]
     position_nll_min_ade = tf.gather(
         position_nll, indices=min_nll_indices_tiled, batch_dims=2, axis=-1
         )[..., 0]
+    #print("position_nll_min_ade ", position_nll_min_ade.shape)
 
     return position_nll_min_ade
 
@@ -218,10 +224,13 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
       ##  input_batch['should_predict'][..., 0], axis=-1)
     should_predict = tf.reduce_any(
         tf.math.logical_not(predictions['mask'][..., 0]), axis=-1)
+    should_predict = tf.expand_dims(should_predict, axis=-1)
     # [b, a]
     loss_per_batch = self.get_per_batch_loss(input_batch, predictions)
 
     # Compute loss only on positions w/ should_predict == True.
+    print("predictions: ", predictions['mask'].shape)
+    print("shuld_predict: ", should_predict.shape)
     should_predict_ind = tf.where(should_predict)
     loss_should_predict_mat = tf.gather_nd(
         params=loss_per_batch, indices=should_predict_ind)
