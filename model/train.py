@@ -3,11 +3,11 @@ import datetime
 import tensorflow as tf
 import tensorflow_models as tfm
 import tensorflow_probability as tfp
-from preprocess_data import load_data
+from .preprocess_data import load_data
 import logging
-from layers import *
-from metrics import *
-from losses import *
+from .layers import *
+from .metrics import *
+from .losses import *
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -181,7 +181,7 @@ def _get_learning_rate_schedule(
 def train_model():
     # prepare train dataset
     batch_size = 32
-    train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/final_dataset.pkl", batch_size=batch_size)
+    train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
     print("loaded dataset")
     model_base_dir = ""
     dt_str = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
@@ -202,9 +202,9 @@ def train_model():
         os.path.join(tensorboard_dir, 'eval'))
 
 
-    batches_per_train_step=10 #25000
-    batches_per_eval_step =1 # 2000
-    eval_every_n_step = 5 #1e4
+    batches_per_train_step=100 #25000
+    batches_per_eval_step =10 # 2000
+    eval_every_n_step = 50 #1e4
 
     strategy = tf.distribute.OneDeviceStrategy('cpu')
 
@@ -251,7 +251,7 @@ def train_model():
      # 5) Actual Training Loop
     train_iter = iter(dist_train_dataset)
     eval_iter = iter(dist_eval_dataset)
-    total_train_steps = 60 # 1e6
+    total_train_steps = 2200#60 # 1e6
     num_train_iter = (
         total_train_steps // batches_per_train_step)
     current_train_iter = (
@@ -321,7 +321,7 @@ def train_model():
 
 def test_model():
     batch_size = 32
-    train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/final_dataset.pkl", batch_size=batch_size)
+    train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
     
     model = build_model()
 

@@ -178,15 +178,7 @@ def get_tracks(df1, df2):
     )
     return track_df
 
-
-
-
-if __name__ == "__main__":
-    input_path = "/home/pbr-student/personal/thesis/jrdb/train_dataset_with_activity"
-    train_scenes, test_scenes = get_train_test_names()
-
-    all_tracks = []
-
+def get_train_pickle():
     for i in tqdm(range(len(train_scenes))):
         scene = train_scenes[i]
         print(scene)
@@ -204,4 +196,35 @@ if __name__ == "__main__":
     print(df.shape[0])
 
     df.to_pickle('df_jrdb.pkl')
+
+def get_test_pickle(test_scenes):
+    for i in tqdm(range(len(test_scenes))):
+        scene = test_scenes[i]
+        print(scene)
+        agents_df = get_3d_features(input_path, scene)
+        for cam in ["_image0","_image2", "_image4", "_image6","_image8"]:
+            keypoints_df = get_keypoints(input_path, cam, scene)
+            track_df_tmp = get_tracks(keypoints_df, agents_df)
+            all_tracks.append(track_df_tmp)
+
+    if len(all_tracks) > 1:
+        df = pd.concat([all_tracks[0], all_tracks[1]], axis=0)
+        if len(all_tracks) > 2:
+            for i in all_tracks[2:]:
+                df = pd.concat([df, i], axis=0)
+    print(df.shape[0])
+
+    df.to_pickle('df_jrdb_test.pkl')
+
+
+
+if __name__ == "__main__":
+    input_path = "/home/pbr-student/personal/thesis/jrdb/train_dataset_with_activity"
+    train_scenes, test_scenes = get_train_test_names()
+
+    all_tracks = []
+
+    get_test_pickle(test_scenes)
+
+    
 
