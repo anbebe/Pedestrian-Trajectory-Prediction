@@ -33,7 +33,6 @@ def load_data(data_path, batch_size=32):
                 np_arr2 = np.asarray([item.numpy() for item in windows2])
                 pose_list.append(np_arr2)
 
-    # 2783 sequences
     pos_dataset = tf.data.Dataset.from_tensor_slices(np.asarray(position_list))
     pose_dataset = tf.data.Dataset.from_tensor_slices(np.asarray(pose_list))
     zip_ds = tf.data.Dataset.zip((pos_dataset, pose_dataset))
