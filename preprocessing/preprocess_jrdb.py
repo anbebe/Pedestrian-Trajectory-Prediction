@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-def get_train_test_names():
+def get_train_names():
     train = [
         "bytes-cafe-2019-02-07_0",
         "clark-center-2019-02-28_0",
@@ -35,36 +35,7 @@ def get_train_test_names():
         "tressider-2019-03-16_1",
         "tressider-2019-04-26_2",
     ]
-    test = [
-        "cubberly-auditorium-2019-04-22_1",
-        "discovery-walk-2019-02-28_0",
-        "discovery-walk-2019-02-28_1",
-        "food-trucks-2019-02-12_0",
-        "gates-ai-lab-2019-04-17_0",
-        "gates-basement-elevators-2019-01-17_0",
-        "gates-foyer-2019-01-17_0",
-        "gates-to-clark-2019-02-28_0",
-        "hewlett-class-2019-01-23_0",
-        "hewlett-class-2019-01-23_1",
-        "huang-2-2019-01-25_1",
-        "huang-intersection-2019-01-22_0",
-        "indoor-coupa-cafe-2019-02-06_0",
-        "lomita-serra-intersection-2019-01-30_0",
-        "meyer-green-2019-03-16_1",
-        "nvidia-aud-2019-01-25_0",
-        "nvidia-aud-2019-04-18_1",
-        "nvidia-aud-2019-04-18_2",
-        "outdoor-coupa-cafe-2019-02-06_0",
-        "quarry-road-2019-02-28_0",
-        "serra-street-2019-01-30_0",
-        "stlc-111-2019-04-19_1",
-        "stlc-111-2019-04-19_2",
-        "tressider-2019-03-16_2",
-        "tressider-2019-04-26_0",
-        "tressider-2019-04-26_1",
-        "tressider-2019-04-26_3",
-    ]
-    return train, test
+    return train
 
 # from human scene transformer, data subfolder
 def get_file_handle(path, mode='rt'):
@@ -178,7 +149,7 @@ def get_tracks(df1, df2):
     )
     return track_df
 
-def get_train_pickle():
+def get_train_pickle(train_scenes):
     for i in tqdm(range(len(train_scenes))):
         scene = train_scenes[i]
         print(scene)
@@ -196,6 +167,46 @@ def get_train_pickle():
     print(df.shape[0])
 
     df.to_pickle('df_jrdb.pkl')
+
+    return df
+
+def get_augmented_train_pickle(df):
+    df=df.reset_index(drop=True)
+    def random_rotate(df):
+        augmented_df = pd.DataFrame(columns=['positions', 'poses'])
+
+        for i,row in df.iterrows():
+            yaw = np.random.uniform(-np.pi, np.pi)
+            
+            # Create rotation matrix for the yaw angle
+            cos_yaw = np.cos(yaw)
+            sin_yaw = np.sin(yaw)
+            rot_mat = np.array([
+                [cos_yaw, -sin_yaw, 0],
+                [sin_yaw,  cos_yaw, 0],
+                [      0,        0, 1]
+            ])
+
+            augmented_df.loc[i] = [np.dot(row['positions'], rot_mat.T), np.dot(row['poses'], rot_mat.T)]
+        return augmented_df
+
+    def random_translate(df):
+        augmented_df = pd.DataFrame(columns=['positions', 'poses'])
+
+        for i,row in df.iterrows():
+            translation = np.random.uniform(-10.0, 10.0, 2)
+            translation = np.append(translation, [0.0])
+            
+            augmented_df.loc[i] = [row['positions'] + translation, row['poses']]
+
+        return augmented_df
+
+    new_df = random_rotate(df)
+    new_df = random_translate(new_df)
+
+    aug_df = pd.concat([df, new_df], ignore_index=True)
+
+    aug_df.to_pickle('df_jrdb_augmented.pkl')
 
 def get_test_pickle(test_scenes):
     for i in tqdm(range(len(test_scenes))):
@@ -220,11 +231,13 @@ def get_test_pickle(test_scenes):
 
 if __name__ == "__main__":
     input_path = "/home/pbr-student/personal/thesis/jrdb/train_dataset_with_activity"
-    train_scenes, test_scenes = get_train_test_names()
+    train_scenes = get_train_names()
 
     all_tracks = []
 
-    get_test_pickle(test_scenes)
+    df = get_train_pickle(train_scenes)
+
+    get_augmented_train_pickle(df)
 
     
 

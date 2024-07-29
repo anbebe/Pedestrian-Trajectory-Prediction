@@ -222,7 +222,7 @@ def train_model():
         optimizer = tf.keras.optimizers.Adam(
             learning_rate=learning_rate_schedule,
             global_clipnorm=1.)
-        loss_obj = MultimodalPositionNLLLoss()#MinNLLPositionMixtureCategoricalCrossentropyLoss()
+        loss_obj = MinNLLPositionLoss()#MinNLLPositionMixtureCategoricalCrossentropyLoss()
         train_metrics = {
         'loss': Mean(),
         'loss_position': Mean(),
