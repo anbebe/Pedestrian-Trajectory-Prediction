@@ -173,6 +173,8 @@ logs/
 pcds/
 pretrained/
 tests/test_dataset/
+model/test_dataset/
+model/train_dataset/
 
 # data files
 *.csv

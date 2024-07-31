@@ -25,8 +25,8 @@ def load_data(data_path, batch_size=32):
             # vox_data = row['voxelgrids'].reshape(-1,1000*2)
             pos_df = tf.data.Dataset.from_tensor_slices(pos_data)
             pose_df = tf.data.Dataset.from_tensor_slices(poses_data)
-            pos_df = pos_df.window(num_steps, shift=3, drop_remainder=True)
-            pose_df = pose_df.window(num_steps, shift=3, drop_remainder=True)
+            pos_df = pos_df.window(num_steps, shift=2, drop_remainder=True)
+            pose_df = pose_df.window(num_steps, shift=2, drop_remainder=True)
             for windows1, windows2 in zip(pos_df, pose_df):
                 np_arr1 = np.asarray([item.numpy() for item in windows1])
                 position_list.append(np_arr1)

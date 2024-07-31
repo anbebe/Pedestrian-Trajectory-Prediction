@@ -3,11 +3,11 @@ import datetime
 import tensorflow as tf
 import tensorflow_models as tfm
 import tensorflow_probability as tfp
-from .preprocess_data import load_data
+from preprocess_data import load_data
 import logging
-from .layers import *
-from .metrics import *
-from .losses import *
+from layers import *
+from metrics import *
+from losses import *
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -18,7 +18,7 @@ class HST(tf.keras.Model):
         hidden_size = 128
         self.preprocess_layer = PreprocessLayer() 
     
-        self.agent_encoder = FeatureAttnAgentEncoderLearnedLayer(input_length=input_length)
+        self.agent_encoder = FeatureConcatAgentEncoderLayer(input_length=input_length)
         self.align_layer = AgentSelfAlignmentLayer()
         self.tranformer1 = SelfAttnTransformerLayer(mask=True)
         self.tranformer2 = SelfAttnTransformerLayer(mask=True)
@@ -33,7 +33,7 @@ class HST(tf.keras.Model):
         (input_1, input_2) = input_batch
         masked_inputs, mask, targets = self.preprocess_layer((input_1, input_2)) # output shape (batch_size, 15, 3)
   
-        encoded_agent, _ = self.agent_encoder((masked_inputs, mask))
+        encoded_agent = self.agent_encoder((masked_inputs, mask))
         self_encoded_agent, _ = self.align_layer((encoded_agent, mask))
         transformed1, _ = self.tranformer1((self_encoded_agent, mask))
         transformed2, _ = self.tranformer2((transformed1, mask))
@@ -51,6 +51,21 @@ class HST(tf.keras.Model):
         'mixture_logits': logits,
         'targets': targets
         }
+        """output_dict={
+            "masked_inputs": masked_inputs,
+            "encoded_agent": encoded_agent,
+            "mask": mask, 
+            "encoded_agent": encoded_agent,
+            "self_encoded_agent": self_encoded_agent,
+            "transformed1": transformed1,
+            "transformed2": transformed2,
+            "transformed3": transformed3,
+            "transformed4": transformed4,
+            "transformed5": transformed5,
+            "transformed6": transformed6,
+            "transformed7": transformed7,
+            "pred": pred
+        }"""
 
         return output_dict
 
@@ -181,7 +196,14 @@ def _get_learning_rate_schedule(
 def train_model():
     # prepare train dataset
     batch_size = 32
-    train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
+    #train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
+    # done loadeing in 36 minutes before and now only load 
+    train_dataset = tf.data.experimental.load(
+    "/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/model/train_dataset"
+    )
+    test_dataset = tf.data.experimental.load(
+    "/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/model/test_dataset"
+    )
     print("loaded dataset")
     model_base_dir = ""
     dt_str = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
@@ -203,8 +225,8 @@ def train_model():
 
 
     batches_per_train_step=100 #25000
-    batches_per_eval_step =10 # 2000
-    eval_every_n_step = 50 #1e4
+    batches_per_eval_step =50 # 2000
+    eval_every_n_step = 400 #1e4
 
     strategy = tf.distribute.OneDeviceStrategy('cpu')
 
@@ -212,7 +234,7 @@ def train_model():
     dist_eval_dataset = strategy.experimental_distribute_dataset(test_dataset)
 
     learning_rate_schedule = _get_learning_rate_schedule(
-        warmup_steps=5e4, total_steps=5e6,
+        warmup_steps=2200, total_steps=4400,
         learning_rate=1e-4)
 
     current_global_step = 0
@@ -251,7 +273,7 @@ def train_model():
      # 5) Actual Training Loop
     train_iter = iter(dist_train_dataset)
     eval_iter = iter(dist_eval_dataset)
-    total_train_steps = 2200#60 # 1e6
+    total_train_steps = 4400#60 # 1e6
     num_train_iter = (
         total_train_steps // batches_per_train_step)
     current_train_iter = (
