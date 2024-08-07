@@ -13,14 +13,13 @@ class Loss(object):
   def __call__(self, input_batch, predictions):
     return self.call(input_batch, predictions)
 
-  def call(self, input_batch, predictions):
+  def call(self, input_dict, predictions):
     """Calculates loss for fields which should be predicted."""
 
     # [b, a, t]
-    ##should_predict = input_batch['should_predict'][..., 0]
-    should_predict = tf.math.logical_not(predictions['mask'])
+    should_predict = input_dict['should_predict'][..., 0]
     # [b, a, t]
-    loss_per_batch = self.get_per_batch_loss(input_batch, predictions)
+    loss_per_batch = self.get_per_batch_loss(input_dict, predictions)
 
     loss_per_batch = tfp.math.clip_by_value_preserve_gradient(
         loss_per_batch,
@@ -54,19 +53,17 @@ class MinNLLPositionMixtureCategoricalCrossentropyLoss(Loss):
   def __init__(self, **kwargs):
     super().__init__(name='MinNLLMixture', **kwargs)
     self.position_loss_obj = MinNLLPositionLoss()
-    #self.mixture_loss_obj = MinNLLMixtureCategoricalCrossentropyLoss()
+    self.mixture_loss_obj = MinNLLMixtureCategoricalCrossentropyLoss()
 
   def call(self, input_batch, predictions):
     position_loss = self.position_loss_obj(input_batch, predictions)
-    print("position loss: ", position_loss)
-    #mixture_loss = self.mixture_loss_obj(input_batch, predictions)
-    #print("mixture loss: ", mixture_loss)
+    mixture_loss = self.mixture_loss_obj(input_batch, predictions)
 
-    loss = position_loss['loss'] #+ mixture_loss['loss']
+    loss = position_loss['loss'] + mixture_loss['loss']
 
     #print("loss: ", loss)
 
-    loss_dict = {**position_loss}#, **mixture_loss}
+    loss_dict = {**position_loss, **mixture_loss}
 
     loss_dict['loss'] = loss
 
@@ -99,14 +96,14 @@ class PositionNLLLoss(Loss):
             model_output['position_raw_scale']))
     return p_pos
 
-  def get_per_batch_loss(self, input_batch, predictions):
+  def get_per_batch_loss(self, input_dict, predictions):
     """Negative log probability of ground truth with respect to predictions."""
     # [b, a, t, 3]
     p_position = self.get_position_distribution(predictions)
 
     # [b, a, t, 1]
     position_nll = -p_position.log_prob(
-        predictions['targets'])
+        input_dict['targets'])
     return position_nll
   
 class MinNLLPositionLoss(PositionNLLLoss):
@@ -117,19 +114,20 @@ class MinNLLPositionLoss(PositionNLLLoss):
     self.mixture_loss = tf.keras.losses.CategoricalCrossentropy(
         from_logits=True, reduction=tf.keras.losses.Reduction.NONE)
 
-  def get_per_batch_loss(self, input_batch, predictions):
+  def get_per_batch_loss(self, input_dict, predictions):
     """Negative log probability of mode with smallest ADE."""
-    predictions = predictions.copy()
+    input_dict = input_dict.copy()
 
-    predictions['targets'] = predictions['targets'][..., tf.newaxis, :]
+    input_dict['targets'] = input_dict['targets'][..., tf.newaxis, :]
     # [b, a, t, n]
-    position_nll = super().get_per_batch_loss(input_batch, predictions)
+    position_nll = super().get_per_batch_loss(input_dict, predictions)
 
     # [b, a, t, 1]
-    ##should_predict = tf.cast(input_batch['should_predict'], tf.float32)
-    should_predict = tf.math.logical_not(predictions['mask'])
-    should_predict = tf.expand_dims(should_predict, axis=-1)
-    should_predict = tf.cast(should_predict, tf.float32)
+    should_predict = tf.cast(input_dict['should_predict'], tf.float32)
+
+    # Extract the mixture logits and compute the mode probabilities
+    #mixture_logits = predictions['mixture_logits']  # [b, 1, M]
+    #mode_probabilities = tf.nn.softmax(mixture_logits, axis=-1)  # [b, 1, M]
 
     # [b, a, t, n, 1]
     per_position_nll = (
@@ -159,6 +157,8 @@ class MinNLLPositionLoss(PositionNLLLoss):
         )[..., 0]
     #print("position_nll_min_ade ", position_nll_min_ade.shape)
 
+    #final_loss = position_nll_min_ade - tf.reduce_sum(tf.math.log(mode_probabilities), axis=-1)
+
     return position_nll_min_ade
 
 # used for JRDB and Pedestrians
@@ -170,22 +170,25 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
     self.mixture_loss = tf.keras.losses.CategoricalCrossentropy(
         from_logits=True, reduction=tf.keras.losses.Reduction.NONE)
 
-  def get_per_batch_loss(self, input_batch, predictions):
+  def get_per_batch_loss(self, input_dict, predictions):
     """Negative log probability of ground truth with respect to predictions."""
-    predictions= predictions.copy()
-    predictions['targets'] = predictions[
+    input_dict= input_dict.copy()
+    input_dict['targets'] = input_dict[
         'targets'][..., tf.newaxis, :]
 
     # Calculate ADE
     # [b, a, t, n, 1]
-    position_nll = super().get_per_batch_loss(input_batch, predictions)
+    position_nll = super().get_per_batch_loss(input_dict, predictions)
     position_nll = tf.expand_dims(position_nll, axis=-1)
 
     # [b, a, t, 1]
     ##should_predict = tf.cast(input_batch['should_predict'], tf.float32)
-    should_predict = tf.cast(tf.expand_dims(tf.math.logical_not(predictions['mask']), axis=-1), tf.float32)
+    should_predict = tf.cast(input_dict['should_predict'], tf.float32)
 
     # [b, a, t, n, 1]
+    #per_position_nll = (
+        #position_nll * should_predict[..., tf.newaxis, :]
+    #)
     per_position_nll = (
         position_nll * should_predict[..., tf.newaxis, :]
     )
@@ -195,8 +198,6 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
     ##per_mode_nll_sum = tf.reduce_sum(per_position_nll, axis=2)
     per_mode_nll_sum = tf.reduce_sum(per_position_nll, axis=1)
 
-    a = tf.shape(position_nll)[1]
-    #n = tf.shape(position_nll)[3]
     n = tf.shape(position_nll)[2]
 
     # [b, a, 1]
@@ -210,6 +211,7 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
     #mixture_loss = self.mixture_loss(
         #min_nll_indices_one_hot,
         #tf.tile(predictions['mixture_logits'][..., 0, :], [1, a, 1]))
+
     
     mixture_loss = self.mixture_loss(
         min_nll_indices_one_hot,
@@ -217,21 +219,19 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
 
     return mixture_loss
 
-  def call(self, input_batch, predictions):
+  def call(self, input_dict, predictions):
     """Calculates loss."""
 
     # [b, a]
-    ##should_predict = tf.reduce_any(
-      ##  input_batch['should_predict'][..., 0], axis=-1)
     should_predict = tf.reduce_any(
-        tf.math.logical_not(predictions['mask'][..., 0]), axis=-1)
-    should_predict = tf.expand_dims(should_predict, axis=-1)
+        input_dict['should_predict'][..., 0], axis=-1)
+    #should_predict = tf.reduce_any(
+       # tf.math.logical_not(predictions['mask'][..., 0]), axis=-1)
+    #should_predict = tf.expand_dims(should_predict, axis=-1)
     # [b, a]
-    loss_per_batch = self.get_per_batch_loss(input_batch, predictions)
+    loss_per_batch = self.get_per_batch_loss(input_dict, predictions)
 
     # Compute loss only on positions w/ should_predict == True.
-    print("predictions: ", predictions['mask'].shape)
-    print("shuld_predict: ", should_predict.shape)
     should_predict_ind = tf.where(should_predict)
     loss_should_predict_mat = tf.gather_nd(
         params=loss_per_batch, indices=should_predict_ind)
@@ -290,19 +290,16 @@ class MultimodalPositionNLLLoss(Loss):
 
     return p_pos_mm
 
-  def get_per_batch_loss(self, input_batch, predictions):
+  def get_per_batch_loss(self, input_dict, predictions):
     """Negative log probability of ground truth with respect to predictions."""
     # [b, a, t, n, 3]
     p_position_mm = self.get_multimodal_position_distribution(
         predictions)
 
-    target = predictions['targets']
-    print("target: ", target)
+    target = input_dict['targets']
     target = target[..., :p_position_mm.event_shape_tensor()[0]]
-    print("target: ", target)
 
     # [b, a, t]
     position_nll = -p_position_mm.log_prob(target)
-    print("position_nll: ", position_nll)
 
     return position_nll

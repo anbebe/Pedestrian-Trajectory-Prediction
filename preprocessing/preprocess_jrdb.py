@@ -230,7 +230,7 @@ def get_test_pickle(test_scenes):
 
 
 if __name__ == "__main__":
-    input_path = "/home/pbr-student/personal/thesis/jrdb/train_dataset_with_activity"
+    input_path =  "/mnt/d/JRDB/train_dataset_with_activity/train_dataset_with_activity"
     train_scenes = get_train_names()
 
     all_tracks = []
