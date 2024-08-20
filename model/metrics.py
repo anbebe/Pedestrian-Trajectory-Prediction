@@ -47,12 +47,11 @@ class ADE(tf.keras.metrics.Metric):
     """Reduces mode dimension. The base class squeezes a single mode."""
     return tf.squeeze(ade_with_modes, axis=-1)
 
-  def update_state(self, input_batch, predictions):
-    should_predict = tf.cast(tf.math.logical_not(predictions['mask']), tf.float32)
-    should_predict = tf.expand_dims(should_predict, axis=-1)
+  def update_state(self, input_dict, predictions):
+    should_predict = tf.cast(input_dict['should_predict'], tf.float32)
     #print("should_predict: ", should_predict.shape)
 
-    target = predictions['targets']
+    target = input_dict['targets']
     target = target[..., :predictions['position'].shape[-1]]
     #print("target: ", target.shape)
     # [b, a, t, n, 3] -> [b, a, t, n, 1]
@@ -81,7 +80,7 @@ class ADE(tf.keras.metrics.Metric):
     deviation = tf.reduce_sum(deviation, axis=1)
     #print("deviation: ", deviation.shape)
     # Reduce along modes
-    deviation = self._reduce(deviation, input_batch, predictions)
+    deviation = self._reduce(deviation, input_dict, predictions)
     #print("deviation: ", deviation.shape)
     # [1]
     deviation = tf.reduce_sum(deviation)
@@ -111,14 +110,14 @@ class MLADE(ADE):
     # [b, a=1, t=1, n]
     ml_indices = tf.math.argmax(predictions['mixture_logits'], axis=-1)
     a = ade_with_modes.shape[1]
-    #ml_indices = tf.tile(
-        #tf.squeeze(ml_indices, axis=1), [1, a])[..., tf.newaxis]
-    ml_indices = tf.squeeze(ml_indices, axis=1)
+    ml_indices = tf.tile(
+        tf.squeeze(ml_indices, axis=1), [1, a])[..., tf.newaxis]
+    #ml_indices = tf.squeeze(ml_indices, axis=1)
 
     #return tf.gather(
        # ade_with_modes, indices=ml_indices, batch_dims=1, axis=-2)[..., 0, :]
     return tf.gather(
-            ade_with_modes, indices=ml_indices[:, tf.newaxis], batch_dims=1, axis=-2)[..., 0]
+            ade_with_modes, indices=ml_indices, batch_dims=1, axis=-2)[..., 0,:]
 
 def force_positive(x, eps=1e-6):
   return tf.keras.activations.elu(x) + 1. + eps
@@ -181,17 +180,15 @@ class PositionNegativeLogLikelihood(tf.keras.metrics.Metric):
     self.total_deviation = self.add_weight(
         name='total_deviation', initializer='zeros')
 
-  def update_state(self, input_batch, predictions):
-    should_predict = tf.cast(tf.math.logical_not(predictions['mask']), tf.float32)
-    should_predict = tf.expand_dims(should_predict, axis=-1)
+  def update_state(self, input_dict, predictions):
+    should_predict = tf.cast(input_dict['should_predict'], tf.float32)
     #print("should_predict: ", should_predict.shape)
 
     p_pos = get_multimodal_position_distribution(predictions)
     #print("p_pos: ", p_pos.shape)
 
-    target = predictions['targets']
+    target = input_dict['targets']
     target = target[..., :p_pos.event_shape_tensor()[0]]
-    print(target.shape)
 
     # [b, a, t, n, 1]
     per_position_nll = -p_pos.log_prob(target)[..., tf.newaxis]
