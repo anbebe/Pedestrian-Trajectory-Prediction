@@ -175,9 +175,11 @@ pretrained/
 tests/test_dataset/
 model/test_dataset/
 model/train_dataset/
+datasets/
 
 # data files
 *.csv
 *.pkl
 *.gif
 *.bag
+*.zip
