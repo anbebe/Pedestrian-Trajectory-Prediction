@@ -47,6 +47,61 @@ class Loss(object):
   def get_per_batch_loss(self, input_batch, predictions):
     raise NotImplementedError
 
+
+# used for JRDB Challenge
+class MultimodalPositionNLLLoss(Loss):
+  """Position loss for human trajectory predictions w/ scene transformer."""
+
+  def __init__(self, **kwargs):
+    super().__init__(name='position', **kwargs)
+
+  # from model.output_distributions
+  def force_positive(self, x, eps=1e-6):
+    return tf.keras.activations.elu(x) + 1. + eps
+
+  # from model.output_distributions
+  def to_positive_definite_scale_tril(self, logit_sigma):
+    tril = tfp.math.fill_triangular(logit_sigma)
+    scale_tril = tf.linalg.set_diag(
+        tril,
+        self.force_positive(tf.linalg.diag_part(tril)))
+    return scale_tril
+
+  # from model.output_distributions
+  def get_position_distribution(self, model_output):
+    """Multivariate Normal distribution over position."""
+    p_pos = tfp.distributions.MultivariateNormalTriL(
+        loc=model_output['position'],
+        scale_tril=self.to_positive_definite_scale_tril(
+            model_output['position_raw_scale']))
+    return p_pos
+
+  # from model.output_distributions
+  def get_multimodal_position_distribution(self, model_output):
+    """Multivariate Normal Mixture distribution over position."""
+    p_pos = self.get_position_distribution(model_output)
+
+    p_pos_mm = tfp.distributions.MixtureSameFamily(
+        mixture_distribution=tfp.distributions.Categorical(
+            logits=model_output['mixture_logits']),
+        components_distribution=p_pos)
+
+    return p_pos_mm
+
+  def get_per_batch_loss(self, input_dict, predictions):
+    """Negative log probability of ground truth with respect to predictions."""
+    # [b, a, t, n, 3]
+    p_position_mm = self.get_multimodal_position_distribution(
+        predictions)
+
+    target = input_dict['targets']
+    target = target[..., :p_position_mm.event_shape_tensor()[0]]
+
+    # [b, a, t]
+    position_nll = -p_position_mm.log_prob(target)
+
+    return position_nll
+
 class MinNLLPositionMixtureCategoricalCrossentropyLoss(Loss):
   """MinNLLPositionNLLLoss and MixtureCategoricalCrossentropyLoss."""
 
@@ -212,10 +267,17 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
         #min_nll_indices_one_hot,
         #tf.tile(predictions['mixture_logits'][..., 0, :], [1, a, 1]))
 
+  # Apply temperature scaling
+    temperature = 0.1
+    scaled_logits = predictions['mixture_logits'] / temperature
+
+    # Normalize logits
+    logits_max = tf.reduce_max(scaled_logits, axis=-1, keepdims=True)
+    normalized_logits = scaled_logits - logits_max
     
     mixture_loss = self.mixture_loss(
         min_nll_indices_one_hot,
-        predictions['mixture_logits'][..., 0, :])
+        normalized_logits[..., 0, :])
 
     return mixture_loss
 
@@ -249,57 +311,3 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
     }
     return loss_dict
   
-
-# used for JRDB Challenge
-class MultimodalPositionNLLLoss(Loss):
-  """Position loss for human trajectory predictions w/ scene transformer."""
-
-  def __init__(self, **kwargs):
-    super().__init__(name='position', **kwargs)
-
-  # from model.output_distributions
-  def force_positive(self, x, eps=1e-6):
-    return tf.keras.activations.elu(x) + 1. + eps
-
-  # from model.output_distributions
-  def to_positive_definite_scale_tril(self, logit_sigma):
-    tril = tfp.math.fill_triangular(logit_sigma)
-    scale_tril = tf.linalg.set_diag(
-        tril,
-        self.force_positive(tf.linalg.diag_part(tril)))
-    return scale_tril
-
-  # from model.output_distributions
-  def get_position_distribution(self, model_output):
-    """Multivariate Normal distribution over position."""
-    p_pos = tfp.distributions.MultivariateNormalTriL(
-        loc=model_output['position'],
-        scale_tril=self.to_positive_definite_scale_tril(
-            model_output['position_raw_scale']))
-    return p_pos
-
-  # from model.output_distributions
-  def get_multimodal_position_distribution(self, model_output):
-    """Multivariate Normal Mixture distribution over position."""
-    p_pos = self.get_position_distribution(model_output)
-
-    p_pos_mm = tfp.distributions.MixtureSameFamily(
-        mixture_distribution=tfp.distributions.Categorical(
-            logits=model_output['mixture_logits']),
-        components_distribution=p_pos)
-
-    return p_pos_mm
-
-  def get_per_batch_loss(self, input_dict, predictions):
-    """Negative log probability of ground truth with respect to predictions."""
-    # [b, a, t, n, 3]
-    p_position_mm = self.get_multimodal_position_distribution(
-        predictions)
-
-    target = input_dict['targets']
-    target = target[..., :p_position_mm.event_shape_tensor()[0]]
-
-    # [b, a, t]
-    position_nll = -p_position_mm.log_prob(target)
-
-    return position_nll

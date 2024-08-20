@@ -172,9 +172,10 @@ openpose/
 logs/
 pcds/
 pretrained/
-tests/test_dataset/
 model/test_dataset/
 model/train_dataset/
+datasets/
+trained_models/
 
 # data files
 *.csv

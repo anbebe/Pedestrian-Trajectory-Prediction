@@ -3,22 +3,22 @@ import datetime
 import tensorflow as tf
 import tensorflow_models as tfm
 import tensorflow_probability as tfp
-from preprocess_data import load_data
+from preprocess_data import load_data, load_synthetic_data
 import logging
 from layers_adap import *
 from metrics import *
 from losses import *
-
 logging.getLogger().setLevel(logging.INFO)
 
 class HST(tf.keras.Model):
     def __init__(self, input_length):
         super().__init__()
 
-        hidden_size = 128
+        hidden_size = 32
         self.preprocess_layer = PreprocessLayer() 
     
-        self.agent_encoder = FeatureConcatAgentEncoderLayer(input_length=input_length)
+        #self.agent_encoder = FeatureConcatAgentEncoderLayer(input_length=input_length)
+        self.agent_encoder = FeatureAttnAgentEncoderLearnedLayer()
         self.align_layer = AgentSelfAlignmentLayer()
         self.transformer1 = SelfAttnTransformerLayer(mask=True)
         self.transformer2 = SelfAttnTransformerLayer(mask=True)
@@ -27,13 +27,13 @@ class HST(tf.keras.Model):
         self.transformer4 = SelfAttnModeTransformerLayer()
         self.transformer5 = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)
         self.transformer6= SelfAttnModeTransformerLayer()
-        self.prediction_layer = Prediction2DPositionHeadLayer()
+        self.prediction_layer = Prediction3DPositionHeadLayer()
 
     def call(self, input_batch, training = False):
         (input_1, input_2) = input_batch
         output_dict = self.preprocess_layer((input_1, input_2)) # output shape (batch_size, 15, 3)
 
-        hidden_vecs = self.agent_encoder(output_dict, training=training)
+        hidden_vecs, _ = self.agent_encoder(output_dict, training=training)
         output_dict["hidden_vecs"] = hidden_vecs
         self_encoded_agent, _ = self.align_layer(output_dict, training=training)
         output_dict["hidden_vecs"] = self_encoded_agent
@@ -187,12 +187,15 @@ def train_model():
     #train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
     # done loadeing in 36 minutes before and now only load 
     train_dataset = tf.data.experimental.load(
-    "/home/annalena/PedestrianTrajectoryPrediction/tests/train_dataset_scaled"
+    "/home/annalena/PedestrianTrajectoryPrediction/datasets/train_dataset_odom_aug"
     )
     test_dataset = tf.data.experimental.load(
-    "/home/annalena/PedestrianTrajectoryPrediction/tests/test_dataset_scaled"
+    "/home/annalena/PedestrianTrajectoryPrediction/datasets/test_dataset_odom_aug"
     )
     print("loaded dataset")
+    print(len(train_dataset))
+    print(len(test_dataset))
+
     model_base_dir = ""
     dt_str = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
     model_dir = os.path.join(model_base_dir, dt_str)
@@ -203,7 +206,7 @@ def train_model():
     os.makedirs(ckpt_best_dir)
     checkpoint_prefix = os.path.join(ckpt_dir, 'ckpt')
     checkpoint_prefix_best = os.path.join(ckpt_best_dir, 'ckpt')
-    tensorboard_dir = '/tmp/tensorboard'
+    tensorboard_dir = '/tmp/tensorboard_4'
 
 
     train_summary_writer = tf.summary.create_file_writer(
@@ -212,9 +215,9 @@ def train_model():
         os.path.join(tensorboard_dir, 'eval'))
 
 
-    batches_per_train_step=300 #25000
+    batches_per_train_step=100 #25000
     batches_per_eval_step =100 # 2000
-    eval_every_n_step = 1200 #1e4
+    eval_every_n_step = 500 #1e4
 
     strategy = tf.distribute.OneDeviceStrategy('gpu')
 
@@ -222,14 +225,16 @@ def train_model():
     dist_eval_dataset = strategy.experimental_distribute_dataset(test_dataset)
 
     learning_rate_schedule = _get_learning_rate_schedule(
-        warmup_steps=5000, total_steps=6600,
-        learning_rate=1e-4)
+        warmup_steps=4000, total_steps=6600,
+        learning_rate=1e-3)
     #learning_rate_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         #initial_learning_rate=1e-3,
         #decay_steps=10000,
-       # decay_rate=0.9)
+        #decay_rate=0.9)
 
     current_global_step = 0
+
+    
 
     with strategy.scope():
         model = HST(15)
@@ -257,6 +262,10 @@ def train_model():
     checkpoint = tf.train.Checkpoint(model=model,
                                     optimizer=optimizer,
                                     best_eval_loss=best_eval_loss)
+    latest_checkpoint = tf.train.latest_checkpoint("/home/annalena/PedestrianTrajectoryPrediction/best_synth/ckpts_best/ckpt/")
+    checkpoint.restore(latest_checkpoint)#.assert_existing_objects_matched()
+    logging.info('Restored from checkpoint: %s', latest_checkpoint)
+    current_global_step = optimizer.iterations.numpy()
     checkpoint_best = tf.train.Checkpoint(model=model)
     best_checkpoint_manager = tf.train.CheckpointManager(checkpoint_best,
                                                         checkpoint_prefix_best,

@@ -40,9 +40,10 @@ class PreprocessLayer(tf.keras.layers.Layer):
 
     def call(self,
            raw_input_batch: Tuple[tf.Tensor, tf.Tensor]) -> Tuple[Tuple[tf.Tensor, tf.Tensor], tf.Tensor]:
-        input_batch = raw_input_batch
+        #input_batch = (raw_input_batch[0][...,:2], raw_input_batch[1])
   
         is_hidden = self.calc_hidden_mask() #tf.convert_to_tensor
+        input_batch = (raw_input_batch[0], raw_input_batch[1])
 
         input_batch_new = []
 
@@ -80,6 +81,40 @@ class PreprocessLayer(tf.keras.layers.Layer):
 
         return output_dict
 
+""" Adapted Sinusoidal Embedding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/embedding.py    """
+class SinusoidalEmbeddingLayer(tf.keras.layers.Layer):
+  """Sinusoidal Postional Embedding for xyz and time."""
+
+  def __init__(self, min_freq=4, max_freq=256, hidden_size=256):
+    super().__init__()
+    self.min_freq = float(min_freq)
+    self.max_freq = float(max_freq)
+    self.hidden_size = hidden_size
+    if hidden_size % 2 != 0:
+      raise ValueError('hidden_size ({hidden_size}) must be divisible by 2.')
+    self.num_freqs_int32 = hidden_size // 2
+    self.num_freqs = tf.cast(self.num_freqs_int32, dtype=tf.float32)
+
+  def build(self, input_shape):
+    log_freq_increment = (
+        tf.math.log(float(self.max_freq) / float(self.min_freq)) /
+        tf.maximum(1.0, self.num_freqs - 1))
+    # [num_freqs]
+    self.inv_freqs = self.min_freq * tf.exp(
+        tf.range(self.num_freqs, dtype=tf.float32) * -log_freq_increment)
+
+  def call(self, input_tensor):
+    
+    # [..., num_freqs]
+    input_tensor = tf.repeat(
+        input_tensor[..., tf.newaxis], self.num_freqs_int32, axis=-1)
+    # [..., h]
+    embedded = tf.concat([
+        tf.sin(input_tensor * self.inv_freqs),
+        tf.cos(input_tensor * self.inv_freqs)
+    ],
+                         axis=-1)
+    return embedded
 
 """ Adapted Agent Position Encoding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/agent_feature_encoder.py    """
 class AgentPositionEncoder(tf.keras.layers.Layer):
@@ -89,9 +124,9 @@ class AgentPositionEncoder(tf.keras.layers.Layer):
     
     super().__init__()
 
-    #self.embedding_layer = SinusoidalEmbeddingLayer(
-       # hidden_size=embedding_size) # output_shape (batch_sie, sequence_length, feature size, hidden_size)
-    self.embedding_layer = keras_nlp.layers.SinePositionEncoding(max_wavelength=10000)
+    self.embedding_layer = SinusoidalEmbeddingLayer(
+      hidden_size=128) # output_shape (batch_sie, sequence_length, feature size, hidden_size)
+    #self.embedding_layer = keras_nlp.layers.SinePositionEncoding(max_wavelength=10000)
     #self.layer_norm = tf.keras.layers.LayerNormalization(axis=-1)  
     self.mlp = tf.keras.layers.EinsumDense(
         '...f,fh->...h',
@@ -111,16 +146,18 @@ class AgentPositionEncoder(tf.keras.layers.Layer):
     not_is_hidden = tf.logical_not(is_hidden)
     mask = tf.logical_and(has_data, not_is_hidden)
     mask = tf.repeat(mask, tf.shape(input_batch[0])[-1], axis=-1)
-    return self.mlp(self.embedding_layer(input_batch[0]))[..., tf.newaxis, :], mask
+    #return self.mlp(self.embedding_layer(input_batch[0]))[..., tf.newaxis, :], mask
+    return self.mlp(self.embedding_layer(input_batch[0])), mask
+    
 class AgentTemporalEncoder(tf.keras.layers.Layer):
   """Encodes agents temporal positions."""
 
   def __init__(self,output_shape, embedding_size, num_steps):
     super().__init__()
-    #self.embedding_layer = SinusoidalEmbeddingLayer(
-        #max_freq=num_steps,
-        #hidden_size=embedding_size)
-    self.embedding_layer = keras_nlp.layers.SinePositionEncoding(max_wavelength=10000)
+    self.embedding_layer = SinusoidalEmbeddingLayer(
+        max_freq=num_steps,
+        hidden_size=128)
+    #self.embedding_layer = keras_nlp.layers.SinePositionEncoding(max_wavelength=10000)
 
     self.mlp = tf.keras.layers.EinsumDense(
         '...f,fh->...h',
@@ -141,11 +178,12 @@ class AgentTemporalEncoder(tf.keras.layers.Layer):
   def call(self, input_dict):
     has_data = input_dict["has_data"]
     input_batch = input_dict["masked_inputs"]
-    return (self.mlp(self._get_temporal_embedding(input_batch))[..., tf.newaxis, :],
+    return (self.mlp(self._get_temporal_embedding(input_batch)),
             tf.ones_like(has_data))
   
 
   """ Adapted Agent Keypoint Encoding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/agent_feature_encoder.py    """
+
 class AgentKeypointsEncoder(tf.keras.layers.Layer):
   """Encodes the agent's keypoints."""
 
@@ -198,14 +236,14 @@ class FeatureConcatAgentEncoderLayer(tf.keras.layers.Layer):
         activation=None,
     )
     self.ff_dropout = tf.keras.layers.Dropout(drop_prob)
-
+    self.temp = AgentPositionEncoder(output_shape=hidden_size-8, embedding_size=hidden_size)
     self.agent_feature_embedding_layers = []
     # Position Feature [batch, sequence_len, feature_size, hidden_size]
     self.agent_feature_embedding_layers.append(
         AgentPositionEncoder(output_shape=hidden_size-8, embedding_size=hidden_size))
     # Feature Embedding - keypoints [batch, sequence_len, hidden_size]
-    self.agent_feature_embedding_layers.append(
-        AgentKeypointsEncoder(output_shape=hidden_size-8, embedding_size=hidden_size))
+    #self.agent_feature_embedding_layers.append(
+        #AgentKeypointsEncoder(output_shape=hidden_size-8, embedding_size=hidden_size))
 
     # Temporal Embedding [batch, sequence_len, 1, hidden_size]
     self.agent_feature_embedding_layers.append(
@@ -219,16 +257,136 @@ class FeatureConcatAgentEncoderLayer(tf.keras.layers.Layer):
     layer_embeddings = []
     for layer in self.agent_feature_embedding_layers:
       layer_embedding, _ = layer(input_dict, training=training)
-      layer_embedding = layer_embedding[...,0,:]
-      #print(layer_embedding)
+      #layer_embedding = layer_embedding[...,0,:]
+      shape = tf.shape(layer_embedding)
+      new_shape = tf.concat([shape[:-2], [shape[-2] * shape[-1]]], axis=0)
+      layer_embedding = tf.reshape(layer_embedding, new_shape)
       layer_embeddings.append(layer_embedding)
     embedding = tf.concat(layer_embeddings, axis=-1)
     #print("embedding", embedding)
 
+    #layer_embedding, _ = self.temp(input_dict, training=training)
+    #shape = tf.shape(layer_embedding)
+    #new_shape = tf.concat([shape[:-2], [shape[-2] * shape[-1]]], axis=0)
+    #embedding = tf.reshape(layer_embedding, new_shape)
+    #print(embedding)
+
     out = self.ff_layer2(embedding)
+
 
     return out
   
+""" Adapted Feature Encoding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/agent_encoder.py    """
+class FeatureAttnAgentEncoderLearnedLayer(tf.keras.layers.Layer):
+  """Independently encodes features and attends to them.
+
+  Agent features are cross-attended with a learned query or hidden_vecs instead
+  of MLP.
+  """
+
+  def __init__(self, input_length=15, batch_size=32, hidden_size=64, num_heads=4, ln_eps=1e-6, transformer_ff_dim=64, drop_prob=0.2):
+    super(FeatureAttnAgentEncoderLearnedLayer, self).__init__()
+
+    self.batch_size=batch_size
+    self.input_length = input_length
+    self.num_heads=num_heads
+
+    # Cross Attention and learned query.
+    self.attn_layer = tf.keras.layers.MultiHeadAttention(
+        num_heads=num_heads,
+        key_dim=64,#240//num_heads,  # "large" to prevent a bottleneck
+        #value_dim=360//num_heads)
+        #key_dim= hidden_size,
+        attention_axes=2)
+    self.attn_ln = tf.keras.layers.LayerNormalization(epsilon=ln_eps)
+    self.ff_layer1 = tf.keras.layers.EinsumDense(
+        '...h,hf->...f',
+        output_shape=transformer_ff_dim,
+        bias_axes='f',
+        activation='relu')
+    self.ff_layer2 = tf.keras.layers.EinsumDense(
+        '...f,fh->...h',
+        output_shape=hidden_size,
+        bias_axes='h',
+        activation=None)
+    self.ff_dropout = tf.keras.layers.Dropout(drop_prob)
+    self.ff_ln = tf.keras.layers.LayerNormalization(epsilon=ln_eps)
+
+    self.agent_feature_embedding_layers = []
+    # Position Feature
+    self.agent_feature_embedding_layers.append(
+        AgentPositionEncoder(output_shape=hidden_size-8, embedding_size=hidden_size))
+    # Feature Embedding - keypoints
+    #self.agent_feature_embedding_layers.append(
+        #AgentKeypointsEncoder(output_shape=hidden_size-8, embedding_size=hidden_size))
+
+    # Temporal Embedding
+    self.agent_feature_embedding_layers.append(
+        AgentTemporalEncoder(output_shape=hidden_size-8, embedding_size=hidden_size, num_steps=input_length))
+
+    # [1, 1, h]
+    self.learned_query_vec = tf.Variable(
+        tf.random_uniform_initializer(
+            minval=-1., maxval=1.)(shape=[1, 1, 1, hidden_size]),
+        trainable=True,
+        dtype=tf.float32)
+
+  def _build_learned_query(self, input_dict):
+    """Converts self.learned_query_vec into a learned query vector."""
+    # This weird thing is for exporting and loading keras model...
+    b = tf.shape(input_dict["masked_inputs"][0])[0]
+    num_steps = tf.shape(input_dict["masked_inputs"][0])[1]
+
+    # [b, num_steps, h]s
+    return tf.tile(self.learned_query_vec, [b, num_steps, 1,1])
+
+  def call(self, input_dict,training = None):
+    
+    layer_embeddings = []
+    layer_masks = []
+    for layer in self.agent_feature_embedding_layers:
+      layer_embedding, layer_mask = layer(input_dict, training=training)
+      layer_embeddings.append(layer_embedding)
+      layer_masks.append(layer_mask)
+    embedding = tf.concat(layer_embeddings, axis=2)
+
+    b = tf.shape(embedding)[0]
+    t = tf.shape(embedding)[1]
+    n = tf.shape(embedding)[2]
+
+    # [1, 1, 1, N, 8]
+    one_hot = tf.one_hot(tf.range(0, n), 8)[None, None]
+    # [b, a, t, N, 8]
+    one_hot_id = tf.tile(one_hot, (b, t, 1, 1))
+
+    embedding = tf.concat([embedding, one_hot_id], axis=-1)
+
+    attention_mask = tf.concat(layer_masks, axis=-1)
+
+    # [b, a, t, num_heads, 1, num_features] <- broadcasted
+    # Newaxis for num_heads, num_features
+    attention_mask = attention_mask[..., tf.newaxis, tf.newaxis,:]
+    attention_mask = tf.reshape(attention_mask, [b, 1, t, n])
+
+    learned_query = self._build_learned_query(input_dict)
+
+    # Attention along axis 3
+    attn_out, attn_score = self.attn_layer(
+        query=learned_query,
+        key=embedding,
+        value=embedding,
+        attention_mask=attention_mask,
+        return_attention_scores=True)
+
+    # [b, t, h]
+    attn_out = attn_out[..., 0, :]
+    out = self.ff_layer1(attn_out)
+    out = self.ff_layer2(out)
+    out = self.ff_dropout(out, training=training)
+    out = self.ff_ln(out + attn_out)
+
+    return out, attn_score
+
 class AgentSelfAlignmentLayer(tf.keras.layers.Layer):
   """Enables agent to become aware of its temporal identity.
 
@@ -236,10 +394,10 @@ class AgentSelfAlignmentLayer(tf.keras.layers.Layer):
   """
 
   def __init__(self,
-               num_heads=8,
-               hidden_size=128,
+               num_heads=4,
+               hidden_size=64,
                ln_eps=1e-6,
-               ff_dim=128):
+               ff_dim=64):
     super().__init__()
     self.hidden_size = hidden_size
     self.num_heads=num_heads
@@ -311,16 +469,17 @@ class AgentSelfAlignmentLayer(tf.keras.layers.Layer):
 
 
     return out, attn_score
+
 class SelfAttnTransformerLayer(tf.keras.layers.Layer):
   """Performs full self-attention across the agent and time dimensions."""
 
   def __init__(
       self,
-      num_heads=8,
-      hidden_size=128,
-      drop_prob=0.1,
+      num_heads=4,
+      hidden_size=64,
+      drop_prob=0.2,
       ln_eps=1e-6,
-      ff_dim=128,
+      ff_dim=64,
       mask=False,
       flatten=False,
       multimodality_induced=False,
@@ -427,11 +586,11 @@ class SelfAttnModeTransformerLayer(tf.keras.layers.Layer):
   """Performs full self-attention across the future modes dimensions."""
 
   def __init__(self,
-               num_heads=8,
-               hidden_size=128,
-               drop_prob=0.1,
+               num_heads=4,
+               hidden_size=64,
+               drop_prob=0.2,
                ln_eps=1e-6,
-               ff_dim=128):
+               ff_dim=64):
     super().__init__()
     self.hidden_size = hidden_size
     if hidden_size % num_heads != 0:
@@ -487,11 +646,11 @@ class MultimodalityInduction(tf.keras.layers.Layer):
 
   def __init__(self,
                num_modes=5,
-               num_heads=8,
-               hidden_size=128,
-               drop_prob=0.1,
+               num_heads=4,
+               hidden_size=64,
+               drop_prob=0.2,
                ln_eps=1e-6,
-               ff_dim=128):
+               ff_dim=64):
     super().__init__()
     self.num_modes = num_modes
     self.hidden_size = hidden_size
@@ -574,7 +733,7 @@ class MultimodalityInduction(tf.keras.layers.Layer):
     return out, mixture_logits
 
 # Adapted from 2D Predictions to 3D predictions
-class Prediction2DPositionHeadLayer(tf.keras.layers.Layer):
+class Prediction3DPositionHeadLayer(tf.keras.layers.Layer):
   """Converts transformer hidden vectors to model predictions."""
 
   def __init__(self, hidden_units=None, num_stages=5):
@@ -606,6 +765,43 @@ class Prediction2DPositionHeadLayer(tf.keras.layers.Layer):
     predictions = {
         'position': pred[..., 0:3],
         'position_raw_scale': pred[..., 3:],
+        'mixture_logits': input_dict['mixture_logits']
+    }
+    return predictions
+
+
+class Prediction2DPositionHeadLayer(tf.keras.layers.Layer):
+  """Converts transformer hidden vectors to model predictions."""
+
+  def __init__(self, hidden_units=None, num_stages=5):
+    super().__init__()
+
+    self.dense_layers = []
+    # Add hidden layers.
+    if hidden_units is not None:
+      for units in hidden_units:
+        self.dense_layers.append(
+            tf.keras.layers.Dense(units, activation='relu'))
+    # Add the final prediction head.
+    self.dense_layers.append(
+        tf.keras.layers.EinsumDense(
+            '...h,hf->...f',
+            output_shape=5,
+            bias_axes='f',
+            activation=None))
+
+  def call(self, input_dict):
+    # [b, t, n,  h]
+    hidden_vecs = input_dict["hidden_vecs"]
+
+    x = hidden_vecs
+    # [b, t, n, 5]
+    for layer in self.dense_layers:
+      x = layer(x)
+    pred = x
+    predictions = {
+        'position': pred[..., 0:2],
+        'position_raw_scale': pred[..., 2:5],
         'mixture_logits': input_dict['mixture_logits']
     }
     return predictions
