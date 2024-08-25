@@ -2,6 +2,8 @@ import numpy as np
 from filterpy.kalman import KalmanFilter
 import matplotlib.pyplot as plt
 from bayes import Bayes
+from scipy.linalg import block_diag
+from filterpy.common import Q_discrete_white_noise
 
 class Kalman_CV(Bayes):
     """
@@ -12,7 +14,7 @@ class Kalman_CV(Bayes):
         super(Kalman_CV, self).__init__(name=name)
         # set to default values
         if self.params == None:
-            self.params = {'q': 0.1, 'r': 0.1, 'P': 10, 'dt': 0.1}
+            self.params = {'q': 0.1, 'r': 0.1, 'P': 0.1, 'dt': 0.4}
 
     def predict(self, batch_positions):
         """
@@ -56,10 +58,11 @@ class Kalman_CV(Bayes):
             kf.P *= self.params['P']
             
             # Process noise covariance
-            kf.Q = np.eye(6) * 0.1
+            q = Q_discrete_white_noise(dim=3, dt=dt, var=0.001)
+            kf.Q = block_diag(q, q)
             
             # Measurement noise covariance
-            kf.R = np.eye(3) * 1.0
+            kf.R = np.eye(3) * 0.1
             
             # Initial state (starting with the first position and zero velocity)
             initial_position = batch_positions[i, 0]
@@ -89,7 +92,7 @@ class Kalman_CA(Bayes):
         super(Kalman_CA, self).__init__(name=name)
         # set to default values
         if self.params == None:
-            self.params = {'q': 0.1, 'r': 0.1, 'P': 10, 'dt': 0.1}
+            self.params = {'q': 0.1, 'r': 0.1, 'P': 1, 'dt': 0.4}
 
     def predict(self, batch_positions):
         """
@@ -137,10 +140,10 @@ class Kalman_CA(Bayes):
             kf.P *= self.params['P']
             
             # Process noise covariance
-            kf.Q = np.eye(9) * 0.1
+            kf.Q = np.eye(9) * 0.01
             
             # Measurement noise covariance
-            kf.R = np.eye(3) * 1.0
+            kf.R = np.eye(3) * 0.1
             
             # Initial state (starting with the first position, estimated velocity, and zero acceleration)
             initial_position = batch_positions[i, 0]
