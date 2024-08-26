@@ -103,7 +103,7 @@ class IMM_CVCA(Bayes):
 
 class IMM_CVCT(Bayes):
     """ 
-    Interacting Multiple Models with Constant Velocity and constant acceleration
+    Interacting Multiple Models with Constant Velocity and constant turn
     """
     def __init__(self, name="IMM_CVCT"):
         super(IMM_CVCT, self).__init__(name=name)

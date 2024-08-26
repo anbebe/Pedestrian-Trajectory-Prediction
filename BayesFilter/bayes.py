@@ -5,9 +5,12 @@ import numpy as np
 from itertools import product
 
 class Bayes():
-    def __init__(self, name=None) -> None:
+    
+    def __init__(self, pos_dim, name=None) -> None:
         self.name = name
+        self.pos_dim = pos_dim # if 2d or 3d positions
         self.params = None
+
     def predict(self, batch_positions):
         pass
 
@@ -27,14 +30,20 @@ class Bayes():
         plt.grid(True)
         plt.show()
     
-    def calculate_minADE(self, ground_truth, predictions, dim):
+    def calculate_minADE(self, ground_truth, predictions):
         # Extract the position part from predictions (assuming position is the first dim components)
-        predicted_positions = predictions[:, :, :dim]
+        predicted_positions = predictions[:, :, :self.pos_dim]
         # Calculate the l2 distance between each point in the trajectory
         displacement_errors = np.linalg.norm(ground_truth - predicted_positions, axis=2)
         # Calculate the average displacement error
         minADE = np.min(np.mean(displacement_errors, axis=1))
         return minADE
+    
+    def calculate_meanADE(self, ground_truth, predictions, dim):
+        predicted_positions = predictions[:, :, :dim]
+        displacement_errors = np.linalg.norm(ground_truth - predicted_positions, axis=2)
+        ADE = np.mean(np.mean(displacement_errors, axis=1))
+        return ADE
 
     def calculate_minFDE(self, ground_truth, predictions, dim):
         # Extract the position part from predictions (assuming position is the first dim components)
@@ -45,18 +54,24 @@ class Bayes():
         minFDE = np.min(final_displacement_errors)
         return minFDE
     
+    def calculate_meanFDE(self, ground_truth, predictions):
+        predicted_positions = predictions[:, :, :self.pos_dim]
+        final_displacement_errors = np.linalg.norm(ground_truth[:, -1] - predicted_positions[:, -1], axis=1)
+        FDE = np.mean(final_displacement_errors)
+        return FDE
+    
     def hyperparameter_tuning(self, batch_positions):
         # Define the hyperparameter space
-        q_values = [0.01, 0.1, 0.5]  # Focus more on increasing process noise
-        r_values = [0.001, 0.01, 0.1]  # Focus on reducing measurement noise
-        P_values = [1, 10, 100]  # Keep as is for now
+        q_values = [0.01, 0.1, 0.5]  
+        r_values = [0.001, 0.01, 0.1] 
+        P_values = [1, 10, 100] 
         M_values = [
-            np.array([[0.85, 0.15], [0.15, 0.85]]),  # Slightly favoring the CT model
+            np.array([[0.85, 0.15], [0.15, 0.85]]),  
             np.array([[0.7, 0.3], [0.3, 0.7]]),
-            np.array([[0.6, 0.4], [0.4, 0.6]])  # More aggressive favoring of CT model
+            np.array([[0.6, 0.4], [0.4, 0.6]]) 
         ]
-        dt_values = [0.2, 0.5, 1.0]  # Smaller time steps to capture slow turns
-        omega_variance_values = [0.01, 0.1, 1.0]  # Example values to explore
+        dt_values = [0.2, 0.5, 1.0]  
+        omega_variance_values = [0.01, 0.1, 1.0]  
 
         # Track the best hyperparameters and metrics
         best_hyperparameters = None
@@ -87,13 +102,13 @@ class Bayes():
         self.hyperparameters = best_hyperparameters
 
 
-def load_dataset(input_path, scale, batch_size):
+def load_dataset(input_path, batch_size, pos_dim, scale=1):
         loaded = tf.data.experimental.load(input_path)
         def tf_dataset_to_numpy(tf_dataset):
             numpy_data = []
             for batch in tf_dataset.as_numpy_iterator():
                 if batch[0].shape[0]==batch_size:
-                    numpy_data.append(batch[0])
+                    numpy_data.append(batch[0][...,:pos_dim])
             return np.asarray(numpy_data)*scale
 
         # Convert the TensorFlow dataset to a numpy array
