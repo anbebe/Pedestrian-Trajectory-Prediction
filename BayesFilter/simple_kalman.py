@@ -278,7 +278,8 @@ class EKF_CT2(Bayes):
             kf.x = np.array([initial_position[0], initial_position[1], 0, 0])
 
             # Initial state covariance
-            kf.P *= self.params['P']
+            #kf.P *= self.params['P']
+            kf.P = np.diag([0.1, 0.1, 1, 1])  # Small uncertainty in position, larger in velocity
 
             # Process noise covariance
             q = Q_discrete_white_noise(dim=self.pos_dim, dt=dt, var=self.params['q'])

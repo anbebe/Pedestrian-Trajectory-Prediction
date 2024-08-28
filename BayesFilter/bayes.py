@@ -14,6 +14,9 @@ class Bayes():
     def predict(self, batch_positions):
         pass
 
+    def hyperparameter_tuning(self, batch_positions):
+        pass
+
     def plot_predictions(self, ground_truth, predictions, sample_index):
         gt_x = ground_truth[sample_index, :, 0]
         gt_y = ground_truth[sample_index, :, 1]
@@ -60,7 +63,7 @@ class Bayes():
         FDE = np.mean(final_displacement_errors)
         return FDE
     
-    def hyperparameter_tuning(self, batch_positions):
+    def hyperparameter_tuning_(self, batch_positions):
         # Define the hyperparameter space
         q_values = [0.01, 0.1, 0.5]  
         r_values = [0.001, 0.01, 0.1] 

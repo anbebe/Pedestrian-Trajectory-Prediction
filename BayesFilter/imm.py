@@ -3,114 +3,23 @@ import matplotlib.pyplot as plt
 from filterpy.kalman import KalmanFilter
 from filterpy.kalman import IMMEstimator
 from bayes import Bayes
-
-class IMM_CVCA(Bayes):
-    """ 
-    Interacting Multiple Models with Constant Velocity and constant acceleration
-    """
-    def __init__(self, name="IMM_CVCA"):
-        super(IMM_CVCA, self).__init__(name=name)
-        # set to default values
-        if self.params == None:
-            self.params = {'q': 0.1, 'r': 0.1, 'P': 1, 'M': [[0.9, 0.1],[0.1, 0.9]], 'dt': 0.1, 'omega_variance': 0.1}
-        
-    def create_imm_cvca_estimator(self, initial_state):
-        state_dim = 9  # Use a consistent state dimension
-        measurement_dim = 3
-
-        dt = self.params['dt']
-
-        # Create a KalmanFilter instance for constant velocity
-        kf_cv = KalmanFilter(dim_x=state_dim, dim_z=measurement_dim)
-        kf_cv.F = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],
-                            [0, 1, 0, 0, dt, 0, 0, 0.5*dt**2, 0],
-                            [0, 0, 1, 0, 0, dt, 0, 0, 0.5*dt**2],
-                            [0, 0, 0, 1, 0, 0, dt, 0, 0],
-                            [0, 0, 0, 0, 1, 0, 0, dt, 0],
-                            [0, 0, 0, 0, 0, 1, 0, 0, dt],
-                            [0, 0, 0, 0, 0, 0, 1, 0, 0],
-                            [0, 0, 0, 0, 0, 0, 0, 1, 0],
-                            [0, 0, 0, 0, 0, 0, 0, 0, 1]])
-        
-        kf_cv.H = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0],
-                            [0, 1, 0, 0, 0, 0, 0, 0, 0],
-                            [0, 0, 1, 0, 0, 0, 0, 0, 0]])
-        kf_cv.P *= 10
-        kf_cv.Q = np.eye(state_dim) * 0.1
-        kf_cv.R = np.eye(measurement_dim) * 1.0
-        kf_cv.x = np.hstack((initial_state[:6], np.zeros(3)))  # Pad with zeros to match the state dimension
-
-        # Create a KalmanFilter instance for constant acceleration
-        kf_ca = KalmanFilter(dim_x=state_dim, dim_z=measurement_dim)
-        kf_ca.F = np.array([[1, 0, 0, dt, 0, 0, 0.5*dt**2, 0, 0],
-                            [0, 1, 0, 0, dt, 0, 0, 0.5*dt**2, 0],
-                            [0, 0, 1, 0, 0, dt, 0, 0, 0.5*dt**2],
-                            [0, 0, 0, 1, 0, 0, dt, 0, 0],
-                            [0, 0, 0, 0, 1, 0, 0, dt, 0],
-                            [0, 0, 0, 0, 0, 1, 0, 0, dt],
-                            [0, 0, 0, 0, 0, 0, 1, 0, 0],
-                            [0, 0, 0, 0, 0, 0, 0, 1, 0],
-                            [0, 0, 0, 0, 0, 0, 0, 0, 1]])
-        
-        kf_ca.H = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0],
-                            [0, 1, 0, 0, 0, 0, 0, 0, 0],
-                            [0, 0, 1, 0, 0, 0, 0, 0, 0]])
-        kf_ca.P *= 10
-        kf_ca.Q = np.eye(state_dim) * 0.1
-        kf_ca.R = np.eye(measurement_dim) * 1.0
-        kf_ca.x = initial_state
-
-        # Define initial mode probabilities
-        mu = np.array([0.5, 0.5])
-
-        # Define Markov chain transition matrix
-        M = np.asarray(self.params['M'])
-
-        # Create IMM Estimator
-        return IMMEstimator([kf_cv, kf_ca], mu, M)
-
-    def predict(self, batch_positions):
-
-        batch_size, timesteps, _ = batch_positions.shape
-
-        dt = self.params['dt']
-        
-        predictions = np.zeros((batch_size, 15, 9))
-        
-        for i in range(batch_size):
-            # Initial state (starting with the first position, estimated velocity, and zero acceleration)
-            initial_position = batch_positions[i, 0]
-            initial_velocity = (batch_positions[i, 1] - batch_positions[i, 0]) / dt
-            initial_acceleration = np.zeros(3)
-            initial_state = np.hstack((initial_position, initial_velocity, initial_acceleration))
-
-            imm = self.create_imm_cvca_estimator(initial_state)
-            
-            # Running the IMM estimator for the first 5 timesteps
-            for t in range(5):
-                z = batch_positions[i, t]
-                imm.predict()
-                imm.update(z)
-                predictions[i, t] = imm.x
-            
-            # Predicting the next 10 timesteps without updating
-            for t in range(5, 15):
-                imm.predict()
-                predictions[i, t] = imm.x
-
-        return predictions
+from sklearn.model_selection import ParameterGrid
 
 
-class IMM_CVCT(Bayes):
+
+class IMM_CVCT_3D(Bayes):
     """ 
     Interacting Multiple Models with Constant Velocity and constant turn
     """
-    def __init__(self, name="IMM_CVCT"):
-        super(IMM_CVCT, self).__init__(name=name)
+    def __init__(self, pos_dim, name="IMM_CVCT"):
+        super(IMM_CVCT_3D, self).__init__(pos_dim=pos_dim, name=name)
         # set to default values
         if self.params == None:
-            self.params = {'q': 0.1, 'r': 0.1, 'P': 1, 'M': [[0.85, 0.15],  # High likelihood of staying in CV
-                [0.15, 0.85]], 'dt': 0.1, 'omega_variance': 0.1}
+            self.params = {'q': 0.1, 'r': 0.1, 'P': 1, 
+                       'M': [[0.85, 0.15],  # High likelihood of staying in CV
+                             [0.15, 0.85]], 
+                       'dt': 0.4, 
+                       'omega_variance': 0.1}
 
     def create_imm_cvct_estimator(self, initial_state):
         state_dim = 10  # Consistent state dimension across both models
@@ -127,9 +36,9 @@ class IMM_CVCT(Bayes):
         kf_cv.F = np.array([[1, 0, 0, dt, 0, 0, 0, 0, 0, 0],
                             [0, 1, 0, 0, dt, 0, 0, 0, 0, 0],
                             [0, 0, 1, 0, 0, dt, 0, 0, 0, 0],
-                            [0, 0, 0, 1, 0, 0, dt, 0, 0, 0],
-                            [0, 0, 0, 0, 1, 0, 0, dt, 0, 0],
-                            [0, 0, 0, 0, 0, 1, 0, 0, dt, 0],
+                            [0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+                            [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+                            [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
                             [0, 0, 0, 0, 0, 0, 1, 0, 0, 0],  # Zero acceleration
                             [0, 0, 0, 0, 0, 0, 0, 1, 0, 0],  # Zero acceleration
                             [0, 0, 0, 0, 0, 0, 0, 0, 1, 0],  # Zero acceleration
@@ -138,9 +47,9 @@ class IMM_CVCT(Bayes):
         kf_cv.H = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                             [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
                             [0, 0, 1, 0, 0, 0, 0, 0, 0, 0]])
-        kf_cv.P = np.eye(state_dim) * 10
-        kf_cv.Q = np.eye(state_dim) * q
-        kf_cv.R = np.eye(measurement_dim) * r
+        kf_cv.P = np.eye(state_dim) * self.params['P']
+        kf_cv.Q = np.eye(state_dim) * self.params['q']
+        kf_cv.R = np.eye(measurement_dim) * self.params['r']
         kf_cv.x = initial_state.copy()
         kf_cv.x[9] = 0  # Zero turn rate for CV model
 
@@ -176,15 +85,15 @@ class IMM_CVCT(Bayes):
         kf_ct.H = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                             [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
                             [0, 0, 1, 0, 0, 0, 0, 0, 0, 0]])
-        kf_ct.P = np.eye(state_dim) * 10
-        kf_ct.Q = np.eye(state_dim) * q
+        kf_ct.P = np.eye(state_dim) * self.params['P']
+        kf_ct.Q = np.eye(state_dim) * self.params['q']
         # Specifically, for the turn rate component
         # Assuming omega_variance is an additional hyperparameter
         kf_ct.Q[6, 6] = q * omega_variance
         kf_ct.Q[7, 7] = q * omega_variance
         kf_ct.Q[9, 9] = q * omega_variance  # Higher uncertainty in the turn rate
 
-        kf_ct.R = np.eye(measurement_dim) * r
+        kf_ct.R = np.eye(measurement_dim) * self.params['r']
         kf_ct.x = initial_state.copy()
 
         # Define initial mode probabilities
@@ -196,24 +105,30 @@ class IMM_CVCT(Bayes):
 
         # Create IMM Estimator
         return IMMEstimator([kf_cv, kf_ct], mu, M)
+    
+    def smooth(self, predictions, alpha=0.5):
+        smoothed_predictions = np.zeros_like(predictions)
+        smoothed_predictions[0] = predictions[0]
+
+        # Forward pass
+        for t in range(1, len(predictions)):
+            smoothed_predictions[t] = alpha * predictions[t] + (1 - alpha) * smoothed_predictions[t-1]
+
+        return smoothed_predictions
 
     def predict(self, batch_positions):
         batch_size, timesteps, _ = batch_positions.shape
         
-        predictions = np.zeros((batch_size, 15, 10))  # Assuming 10 state dimensions
+        predictions = np.zeros((batch_size, timesteps, 10))  # Assuming 10 state dimensions
         dt = self.params['dt']
-        q = self.params['q']
-        r = self.params['r']
-        omega_variance = self.params['omega_variance']
         
         for i in range(batch_size):
             # Initial state estimation
             initial_position = batch_positions[i, 0]
             initial_velocity = (batch_positions[i, 1] - batch_positions[i, 0]) / dt
-            initial_acceleration = np.zeros(2)
-            initial_turn_rate = 0.0  # Assuming starting with no turn
-            initial_state = np.hstack((initial_position, initial_velocity, initial_turn_rate, initial_acceleration))
-            initial_state = np.hstack((initial_state, 0))  # Padding to match state dimension if necessary
+            initial_acceleration = np.zeros(3)
+            initial_turn_rate = 0.1  # Assuming starting with no turn
+            initial_state = np.hstack((initial_position, initial_velocity, initial_acceleration, initial_turn_rate))
 
             # Create IMM estimator with the provided hyperparameters
             imm = self.create_imm_cvct_estimator(initial_state)
@@ -224,13 +139,264 @@ class IMM_CVCT(Bayes):
                 imm.predict()
                 imm.update(z)
                 predictions[i, t] = imm.x
+
+            # Apply a refined smoothing technique to the first 10 timesteps
+            predictions[i, :5, :] = self.smooth(predictions[i, :5, :], alpha=0.6)
             
             # Predicting the next 10 timesteps without updating (no measurements)
             for t in range(5, 15):
                 imm.predict()
                 predictions[i, t] = imm.x
 
+            # Apply smoothing to the last 5 timesteps of predictions
+            predictions[i, 5:timesteps, :] = self.smooth(predictions[i, 5:timesteps, :], alpha=0.7)
+
         return predictions
+    
+    def hyperparameter_tuning(self, batch_positions,index = 0):
+        # Define the parameter grid
+        param_grid = {
+            'q': [0.1, 0.2, 0.5, 0.8, 1.0], 
+            'r': [0.1, 0.2, 0.5, 0.8, 1.0], 
+            'P':[0.1, 0.5, 1.0, 10.0], 
+            'M': [[[0.9, 0.1],[0.1, 0.9]],
+                [[0.8, 0.2],[0.2, 0.8]],
+                [[0.6, 0.4],[0.4, 0.6]],
+                [[0.5, 0.5],[0.5, 0.5]]
+                                ], 
+            'dt':  [0.1,0.4,0.9], 
+            'omega_variance':[0.1, 0.2, 0.5, 0.8, 1.0]
+
+        }
+
+        # Generate combinations of parameters
+        grid = ParameterGrid(param_grid)
+
+        best_score = float('inf')
+        best_params = None
+
+        # Grid search loop
+        for params in grid:
+            # Initialize the IMMParticleFilter with current parameters
+            model = IMM_CVCT_2D(pos_dim=2)
+            model.params['q'] = params['q']
+            model.params['r'] = params['r']
+            model.params['P'] = params['P']
+            model.params['M'] = params['M']
+            model.params['dt'] = params['dt']
+            model.params['omega_variance'] = params['omega_variance']
+            
+            # Run the filter on your data and calculate the prediction error
+            predictions = model.predict(batch_positions[index][:])
+            
+            # Calculate the error using the modified function
+            error = self.calculate_meanADE(batch_positions[index][:], predictions, dim=3)
+
+            # Update the best parameters if the current configuration yields a lower error
+            if error < best_score:
+                best_score = error
+                best_params = params
+
+        # Print the best hyperparameters and corresponding score
+        print("Best Parameters:", best_params)
+        print("Best Score:", best_score)
+        self.params = best_params
+
+
+class IMM_CVCT_2D(Bayes):
+    """ 
+    Interacting Multiple Models with Constant Velocity (CV) and Constant Turn (CT) 
+    for 2D Position Tracking.
+    """
+    def __init__(self, pos_dim, name="IMM_CVCT"):
+        super(IMM_CVCT_2D, self).__init__(pos_dim=pos_dim, name=name)
+        if self.params == None:
+            self.params = {'q': 0.1, 'r': 0.1, 'P': 1, 
+                        'M': [[0.85, 0.15],  # High likelihood of staying in CV
+                                [0.15, 0.85]], 
+                        'dt': 0.4, 
+                        'omega_variance': 0.1}
+
+    def create_imm_cvct_estimator(self, initial_state):
+        # Define the state and measurement dimensions
+        state_dim = 7  # Consistent 7-dimensional state
+        measurement_dim = 2  # Assume 2D position measurements (x, y)
+        
+        dt = self.params['dt']
+        omega_variance = self.params['omega_variance']
+        
+        # Create Kalman Filter for Constant Velocity (CV) Model
+        kf_cv = KalmanFilter(dim_x=state_dim, dim_z=measurement_dim)
+        kf_cv.F = np.array([[1, 0, dt, 0, 0, 0, 0], # x
+                            [0, 1, 0, dt, 0, 0, 0], # y
+                            [0, 0, 1, 0, 0, 0, 0], # vx
+                            [0, 0, 0, 1, 0, 0, 0], # vy
+                            [0, 0, 0, 0, 1, 0, 0], # zero acceleration
+                            [0, 0, 0, 0, 0, 1, 0], # zero acceleration
+                            [0, 0, 0, 0, 0, 0, 1]]) # constant turn rate
+        
+        kf_cv.H = np.array([[1, 0, 0, 0, 0, 0, 0],
+                            [0, 1, 0, 0, 0, 0, 0]])
+        kf_cv.P = np.eye(state_dim) * self.params['P']
+        kf_cv.Q = np.eye(state_dim) * self.params['q']
+        kf_cv.R = np.eye(measurement_dim) * self.params['r']
+        kf_cv.x = np.hstack((initial_state[:4], [0], [0], [0]))  # Expand initial state for CV
+
+        def ct_jacobian( x, dt):
+            F = np.eye(7)  # Start with an identity matrix for stability
+
+            omega = x[6]
+            v_x = x[2]
+            v_y = x[3]
+
+            # If omega is near zero, use a linear approximation
+            if abs(omega) < 1e-5:
+                F[0, 2] = dt
+                F[1, 3] = dt
+                F[2, 4] = dt
+                F[3, 5] = dt
+            else:
+                F[0, 2] = np.sin(omega * dt) / omega
+                F[0, 3] = -(1 - np.cos(omega * dt)) / omega
+                F[1, 2] = (1 - np.cos(omega * dt)) / omega
+                F[1, 3] = np.sin(omega * dt) / omega
+
+                F[2, 2] = np.cos(omega * dt)
+                F[2, 3] = -np.sin(omega * dt)
+                F[3, 2] = np.sin(omega * dt)
+                F[3, 3] = np.cos(omega * dt)
+
+            # Acceleration contributions (could be simplified or refined)
+            F[2, 4] = dt  # dv_x / da_x
+            F[3, 5] = dt  # dv_y / da_y
+
+            # Turn rate affects velocity
+            F[2, 6] = -v_y * dt
+            F[3, 6] = v_x * dt
+
+            return F
+
+        # Create Kalman Filter for Coordinated Turn (CT) Model
+        kf_ct = KalmanFilter(dim_x=state_dim, dim_z=measurement_dim)
+        kf_ct.F = ct_jacobian(kf_ct.x, dt)
+        kf_ct.H = np.array([[1, 0, 0, 0, 0, 0, 0],
+                            [0, 1, 0, 0, 0, 0, 0]])
+        kf_ct.P = np.eye(state_dim) * self.params['P']
+        kf_ct.Q = np.eye(state_dim) * self.params['q']
+        kf_ct.Q[4, 4] *= omega_variance  # Adjust variance for the turn rate
+        kf_ct.Q[5, 5] *= omega_variance  # Adjust variance for the turn rate
+        kf_ct.Q[6, 6] *= omega_variance  # Adjust variance for the turn rate
+        kf_ct.R = np.eye(measurement_dim) * self.params['r']
+        kf_ct.x = initial_state.copy()  # Use full initial state for CT
+        
+        # Define initial mode probabilities
+        mu = np.array([0.5, 0.5])
+        
+        # Define Markov chain transition matrix
+        M = np.array(self.params['M'])  # Transition probabilities
+        
+        # Create IMM Estimator
+        return IMMEstimator([kf_cv, kf_ct], mu, M)
+
+    def smooth(self, predictions, alpha=0.5):
+        smoothed_predictions = np.zeros_like(predictions)
+        smoothed_predictions[0] = predictions[0]
+
+        # Forward pass
+        for t in range(1, len(predictions)):
+            smoothed_predictions[t] = alpha * predictions[t] + (1 - alpha) * smoothed_predictions[t-1]
+
+        return smoothed_predictions
+
+    def predict(self, batch_positions):
+        batch_size, timesteps, _ = batch_positions.shape
+        prediction_timesteps = 15  # 10 updates + 5 predictions
+        predictions = np.zeros((batch_size, prediction_timesteps, 2))  # Predicting only (x, y) positions
+
+        dt = self.params['dt']
+        for i in range(batch_size):
+            initial_position = batch_positions[i, 0]
+            initial_velocity = (batch_positions[i, 1] - batch_positions[i, 0]) / dt
+            initial_acceleration = np.zeros(2)
+            initial_turn_rate = 0.0  # Assuming starting with no turn
+
+            initial_state = np.hstack((initial_position, initial_velocity, initial_acceleration, initial_turn_rate))
+            imm = self.create_imm_cvct_estimator(initial_state)
+
+            # IMM prediction and update for the first 10 timesteps
+            for t in range(5):
+                z = batch_positions[i, t]
+                imm.predict()
+                imm.update(z)
+                predictions[i, t] = imm.x[:2]
+
+            # Apply a refined smoothing technique to the first 10 timesteps
+            predictions[i, :5, :] = self.smooth(predictions[i, :5, :], alpha=0.6)
+
+            # Predicting the next 5 timesteps without measurement updates
+            for t in range(5, prediction_timesteps):
+                imm.predict()
+                predictions[i, t] = imm.x[:2]
+
+            # Apply smoothing to the last 5 timesteps of predictions
+            predictions[i, :prediction_timesteps, :] = self.smooth(predictions[i, :prediction_timesteps, :], alpha=0.6)
+
+        return predictions
+
+    def hyperparameter_tuning(self, batch_positions,index = 0):
+        # Define the parameter grid
+        param_grid = {
+            'q': [0.1, 0.2, 0.5, 0.8, 1.0], 
+            'r': [0.1, 0.2, 0.5, 0.8, 1.0], 
+            'P':[0.1, 0.5, 1.0, 10.0], 
+            'M': [[[0.9, 0.1],[0.1, 0.9]],
+                [[0.8, 0.2],[0.2, 0.8]],
+                [[0.6, 0.4],[0.4, 0.6]],
+                [[0.5, 0.5],[0.5, 0.5]]
+                                ], 
+            'dt':  [0.1,0.4,0.9], 
+            'omega_variance':[0.1, 0.2, 0.5, 0.8, 1.0]
+
+        }
+
+        # Generate combinations of parameters
+        grid = ParameterGrid(param_grid)
+
+        best_score = float('inf')
+        best_params = None
+
+        # Grid search loop
+        for params in grid:
+            # Initialize the IMMParticleFilter with current parameters
+            model = IMM_CVCT_2D(pos_dim=2)
+            model.params['q'] = params['q']
+            model.params['r'] = params['r']
+            model.params['P'] = params['P']
+            model.params['M'] = params['M']
+            model.params['dt'] = params['dt']
+            model.params['omega_variance'] = params['omega_variance']
+            
+            # Run the filter on your data and calculate the prediction error
+            predictions = model.predict(batch_positions[index][:])
+            
+            # Calculate the error using the modified function
+            error = self.calculate_meanADE(batch_positions[index][:], predictions, dim=2)
+
+            # Update the best parameters if the current configuration yields a lower error
+            if error < best_score:
+                best_score = error
+                best_params = params
+
+        # Print the best hyperparameters and corresponding score
+        print("Best Parameters:", best_params)
+        print("Best Score:", best_score)
+        self.params = best_params
+
+
+
+
+
+
 
 
 
