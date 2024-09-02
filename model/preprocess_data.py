@@ -51,14 +51,14 @@ def load_data(data_path, batch_size=32):
     # shuffle, batch and split dataset
     DATASET_SIZE = len(zip_ds)
 
-    train_size = int(0.8 * DATASET_SIZE)
+    train_size = int(1 * DATASET_SIZE)
     test_size = int(0.2 * DATASET_SIZE)
 
     train_dataset = zip_ds.take(train_size)
-    test_dataset = zip_ds.skip(train_size)
+    #test_dataset = zip_ds.skip(train_size)
 
     # returns each dataset with tuple of (batch position, batch keypoints)
-    return train_dataset, test_dataset
+    return train_dataset#, test_dataset
 
 def load_synthetic_data():
     # Generate a sequence of 2D positions with constant acceleration
