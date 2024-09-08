@@ -3,7 +3,7 @@ import datetime
 import tensorflow as tf
 import tensorflow_models as tfm
 import tensorflow_probability as tfp
-from .preprocess_data import load_data
+from .preprocess_data import load_data, load_synthetic_data
 import logging
 from .layers_adap import *
 from .metrics import *

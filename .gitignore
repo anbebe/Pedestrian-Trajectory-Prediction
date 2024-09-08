@@ -167,6 +167,7 @@ FairMOT/
 examples/
 BoT-SORT/
 openpose/
+Trajectron-plus-plus
 
 # logs, pointclouds and pretrained models
 logs/
