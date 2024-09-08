@@ -9,6 +9,7 @@ import sympy as sp
 from filterpy.kalman import ExtendedKalmanFilter
 from scipy.linalg import block_diag
 from filterpy.common import Q_discrete_white_noise
+from sklearn.model_selection import ParameterGrid
 
 
 class Kalman_CV(Bayes):
@@ -108,6 +109,49 @@ class Kalman_CV(Bayes):
                 predictions[i, t] = kf.x
         
         return predictions
+    
+    def hyperparameter_tuning(self, batch_positions):
+        # Define the hyperparameter space
+
+        param_grid = {
+            'q': [0.1, 0.2, 0.5, 0.8], 
+            'r': [0.1, 0.2, 0.5, 0.8], 
+            'P':[0.1, 0.5, 1.0], 
+            'dt':  [0.1,0.4,0.9]        }
+
+        # Track the best hyperparameters and metrics
+        best_hyperparameters = None
+
+        grid = ParameterGrid(param_grid)
+
+        best_score = float('inf')
+        best_params = None
+
+        # Loop through all combinations of hyperparameters
+        for params in grid:
+            # Initialize the IMMParticleFilter with current parameters
+            self.params['q'] = params['q']
+            self.params['r'] = params['r']
+            self.params['P'] = params['P']
+            self.params['dt'] = params['dt']
+            
+            # Run the filter on your data and calculate the prediction error
+            predictions = self.predict(batch_positions)
+            
+            # Calculate the error using the modified function
+            error = self.calculate_meanADE(batch_positions, predictions, dim=2)
+
+            # Update the best parameters if the current configuration yields a lower error
+            if error < best_score:
+                best_score = error
+                best_params = params
+
+
+
+        # Output the best hyperparameters and corresponding metrics
+        print("Best Hyperparameters:", best_params)
+        print("Best score:", best_score)
+        self.hyperparameters = best_params
     
 class Kalman_CA(Bayes):
     """

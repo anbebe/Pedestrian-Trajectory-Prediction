@@ -40,10 +40,10 @@ class PreprocessLayer(tf.keras.layers.Layer):
 
     def call(self,
            raw_input_batch: Tuple[tf.Tensor, tf.Tensor]) -> Tuple[Tuple[tf.Tensor, tf.Tensor], tf.Tensor]:
-        #input_batch = (raw_input_batch[0][...,:2], raw_input_batch[1])
+        input_batch = (raw_input_batch[0][...,:2], raw_input_batch[1])
   
         is_hidden = self.calc_hidden_mask() #tf.convert_to_tensor
-        input_batch = (raw_input_batch[0], raw_input_batch[1])
+        #input_batch = (raw_input_batch[0], raw_input_batch[1])
 
         input_batch_new = []
 

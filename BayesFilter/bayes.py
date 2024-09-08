@@ -63,46 +63,7 @@ class Bayes():
         FDE = np.mean(final_displacement_errors)
         return FDE
     
-    def hyperparameter_tuning_(self, batch_positions):
-        # Define the hyperparameter space
-        q_values = [0.01, 0.1, 0.5]  
-        r_values = [0.001, 0.01, 0.1] 
-        P_values = [1, 10, 100] 
-        M_values = [
-            np.array([[0.85, 0.15], [0.15, 0.85]]),  
-            np.array([[0.7, 0.3], [0.3, 0.7]]),
-            np.array([[0.6, 0.4], [0.4, 0.6]]) 
-        ]
-        dt_values = [0.2, 0.5, 1.0]  
-        omega_variance_values = [0.01, 0.1, 1.0]  
-
-        # Track the best hyperparameters and metrics
-        best_hyperparameters = None
-        best_minADE = float('inf')
-        best_minFDE = float('inf')
-
-        # Loop through all combinations of hyperparameters
-        for omega_variance in omega_variance_values:
-            for q, r, P, M, dt in product(q_values, r_values, P_values, M_values, dt_values):
-            
-                # Run the IMM estimator with the current hyperparameters
-                predictions = self.predict(batch_positions[0][0:], q, r, omega_variance, P, M, dt)
-                
-                # Calculate metrics
-                minADE = self.calculate_minADE(batch_positions[0][0:], predictions)
-                minFDE = self.calculate_minFDE(batch_positions[0][0:], predictions)
-                
-                # Update the best hyperparameters if this combination is better
-                if minADE < best_minADE or (minADE == best_minADE and minFDE < best_minFDE):
-                    best_minADE = minADE
-                    best_minFDE = minFDE
-                    best_hyperparameters = {'q': q, 'r': r, 'P': P, 'M': M, 'dt': dt, 'omega_variance': omega_variance}
-
-        # Output the best hyperparameters and corresponding metrics
-        print("Best Hyperparameters:", best_hyperparameters)
-        print("Best minADE:", best_minADE)
-        print("Best minFDE:", best_minFDE)
-        self.hyperparameters = best_hyperparameters
+    
 
 
 def load_dataset(input_path, batch_size, pos_dim, scale=1):

@@ -112,10 +112,10 @@ class ParticleFilter(Bayes):
     def hyperparameter_tuning(self, batch_positions,index = 0):
         # Define the parameter grid
         param_grid = {
-            'num_particles': [500, 1000, 2000, 5000],
-            'process_noise_cv': [0.1, 0.2, 0.5, 0.8, 1.0],
+            'num_particles': [1000, 2000, 5000],
+            'process_noise_cv': [0.2, 0.5, 1.0],
             'measurement_noise': [0.2, 0.5, 1.0],
-            'dt': [0.1,0.4,0.6]
+            'dt': [0.1,0.5,1.0]
 
         }
 
@@ -128,17 +128,16 @@ class ParticleFilter(Bayes):
         # Grid search loop
         for params in grid:
             # Initialize the IMMParticleFilter with current parameters
-            model = ParticleFilter(pos_dim=2)
-            model.params['num_particles'] = params['num_particles']
-            model.params['process_noise_cv'] = params['process_noise_cv']
-            model.params['measurement_noise'] = params['measurement_noise']
-            model.params['dt'] = params['dt']
+            self.params['num_particles'] = params['num_particles']
+            self.params['process_noise_cv'] = params['process_noise_cv']
+            self.params['measurement_noise'] = params['measurement_noise']
+            self.params['dt'] = params['dt']
             
             # Run the filter on your data and calculate the prediction error
-            predictions = model.predict(batch_positions[index][:])
+            predictions = self.predict(batch_positions[:])
             
             # Calculate the error using the modified function
-            error = self.calculate_meanADE(batch_positions[index][:], predictions, dim=2)
+            error = self.calculate_meanADE(batch_positions[:], predictions, dim=2)
 
             # Update the best parameters if the current configuration yields a lower error
             if error < best_score:
