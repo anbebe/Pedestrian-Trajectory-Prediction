@@ -5,6 +5,11 @@ from bayes import Bayes
 from sklearn.model_selection import ParameterGrid
 
 class ParticleFilter(Bayes):
+
+    """
+        Particle Filter Class that uses the constant velocity model to predict trajectories.
+    """
+
     def __init__(self, name="Particle_Filter"):
         super(ParticleFilter, self).__init__(pos_dim=2, name=name)
         self.state_dim = 4
@@ -16,82 +21,97 @@ class ParticleFilter(Bayes):
                         'measurement_noise': 0.2, 
                         'dt': 0.41}
 
-        # Particles and weights for each model
-        self.particles_cv = np.zeros((self.params['num_particles'], self.state_dim))
-        self.weights_cv = np.ones(self.params['num_particles']) / self.params['num_particles']
+        # Particles and weights for the cv model
+        self.particles = np.zeros((self.params['num_particles'], self.state_dim))
+        self.weights = np.ones(self.params['num_particles']) / self.params['num_particles']
 
 
-    def create_uniform_particles(self, x_range, y_range, vx_range, vy_range):
-        for model_particles in [self.particles_cv, self.particles_ctrv]:
-            model_particles[:, 0] = uniform(x_range[0], x_range[1], size=self.params['num_particles'])
-            model_particles[:, 1] = uniform(y_range[0], y_range[1], size=self.params['num_particles'])
-            model_particles[:, 2] = uniform(vx_range[0], vx_range[1], size=self.params['num_particles'])
-            model_particles[:, 3] = uniform(vy_range[0], vy_range[1], size=self.params['num_particles'])
-
-    def estimate_initial_velocity(self, first_two_observations, dt=1.0):
+    def estimate_initial_velocity(self, observations, dt=1.0):
         """
         Estimate initial velocity based on the first two observations.
+
+        :param observations the first two positions of the trajectory of shape (2,2)
+
+        :returns estimated initial velocity vector of shape (2)
         """
-        velocity = (first_two_observations[1] - first_two_observations[0]) / dt
+        velocity = (observations[1] - observations[0]) / self.params['dt']
         return velocity
 
-    def create_particles_with_estimated_velocity(self, first_observation, estimated_velocity, omega_init=0, position_noise=0.1, velocity_noise=0.1, omega_noise=0.01):
+    def create_particles_with_estimated_velocity(self, init_pos, init_velo, position_noise=0.1, velocity_noise=0.1):
         """
         Initialize particles based on the first observation and estimated velocity with added noise.
-        """
-        for model_particles in [self.particles_cv]:#[self.particles_cv, self.particles_ctrv]:
-            # Position initialization around the first observed position
-            model_particles[:, 0] = normal(first_observation[0], position_noise, size=self.params['num_particles'])
-            model_particles[:, 1] = normal(first_observation[1], position_noise, size=self.params['num_particles'])
-            
-            # Velocity initialization around the estimated velocity
-            model_particles[:, 2] = normal(estimated_velocity[0], velocity_noise, size=self.params['num_particles'])
-            model_particles[:, 3] = normal(estimated_velocity[1], velocity_noise, size=self.params['num_particles'])
 
-    def predict_cv(self):
-        self.particles_cv[:, 0] += self.particles_cv[:, 2] * self.params['dt'] + normal(0, self.params['process_noise_cv'], size=self.params['num_particles'])
-        self.particles_cv[:, 1] += self.particles_cv[:, 3] * self.params['dt'] + normal(0, self.params['process_noise_cv'], size=self.params['num_particles'])
+        :param init_pos the first trajectory position in 2D
+        :param init_velo the first velocity of the trajectory in 2D
+        :param position_noise initial position noise
+        :param init_velo initial velocity noise
+        """
+        for model_particles in [self.particles]:
+            # add noise to the postion initialization
+            model_particles[:, 0] = normal(init_pos[0], position_noise, size=self.params['num_particles'])
+            model_particles[:, 1] = normal(init_pos[1], position_noise, size=self.params['num_particles'])
+            
+            # add noise to the velocity initialization
+            model_particles[:, 2] = normal(init_velo[0], velocity_noise, size=self.params['num_particles'])
+            model_particles[:, 3] = normal(init_velo[1], velocity_noise, size=self.params['num_particles'])
+
+    def predict_particles(self):
+        """
+        Predict the next state of each particle with the CV model
+        """
+        self.particles[:, 0] += self.particles[:, 2] * self.params['dt'] + normal(0, self.params['process_noise_cv'], size=self.params['num_particles'])
+        self.particles[:, 1] += self.particles[:, 3] * self.params['dt'] + normal(0, self.params['process_noise_cv'], size=self.params['num_particles'])
 
    
     def update(self, z):
-        # Compute weights based on measurement likelihood
-        diff_cv = self.particles_cv[:, :self.measurement_dim] - z
+        """
+        Update the particle weights based on the measurement likelihood
+
+        :param z current measurement of position
+        """
+        # Compute distance bewtween particles belief and measurement
+        diff_cv = self.particles[:, :self.measurement_dim] - z
         dist_cv = np.linalg.norm(diff_cv, axis=1)
-        self.weights_cv *= norm.pdf(dist_cv, scale=self.params['measurement_noise'])
+        # Adjusts weights by the gaussian likelihood
+        self.weights *= norm.pdf(dist_cv, scale=self.params['measurement_noise'])
 
         # Normalize weights
-        self.weights_cv /= np.sum(self.weights_cv)
+        self.weights /= np.sum(self.weights)
 
     def resample(self):
-        self.weights_cv = np.nan_to_num(self.weights_cv, nan=0.0)
-        if np.sum(self.weights_cv) == 0:
-            self.weights_cv.fill(1.0 / self.params['num_particles'])
+        """
+        Resample the particles based on their wights using systematic resampling
+        """
+        # handle nan and zero values
+        self.weights = np.nan_to_num(self.weights, nan=0.0)
+        if np.sum(self.weights) == 0:
+            self.weights.fill(1.0 / self.params['num_particles'])
         else:
-            self.weights_cv /= np.sum(self.weights_cv)
-        indices_cv = np.random.choice(self.params['num_particles'], size=self.params['num_particles'], p=self.weights_cv)
-        self.particles_cv = self.particles_cv[indices_cv]
-        self.weights_cv.fill(1.0 / self.params['num_particles'])
+            self.weights /= np.sum(self.weights)
+
+        # resample weights based on weights and reset the weights
+        indices_cv = np.random.choice(self.params['num_particles'], size=self.params['num_particles'], p=self.weights)
+        self.particles = self.particles[indices_cv]
+        self.weights.fill(1.0 / self.params['num_particles'])
 
     def estimate_average(self):
-        # Combine the estimates from both models and take average of all particles
-        estimate_cv = np.average(self.particles_cv, weights=self.weights_cv, axis=0)
+        """
+        Estimates the average of the predicted states of all particles.
+        """
+        estimate_cv = np.average(self.particles, weights=self.weights, axis=0)
         return estimate_cv
-    
-    def estimate_top_three(self, top_n=3):
-        # Sort particles by weight in descending order
-        sorted_indices_cv = np.argsort(self.weights_cv)[::-1]
 
-        # Get the top N particles for each model
-        top_particles_cv = self.particles_cv[sorted_indices_cv[:top_n]]
-    
-        # Combine the top N particles based on model probabilities
-        combined_estimates = []
-        for i in range(top_n):
-            combined_estimates.append(top_particles_cv[i])
-        
-        return np.array(combined_estimates)
 
     def predict(self, batch_positions):
+        """
+        Predict the next 10 timesteps from 5 given ground truth 2D positions with the Particle filter and
+        a constant velocity model.
+
+        :param batch_positions ground truth trajectories of shape (batch_Size, 15,2)
+
+        :returns predicted trajectory of shape (batch_size, 15,2)
+        """
+        # history steps
         tmp_t = 5
         batch_size, timesteps, _ = batch_positions.shape
         predictions = np.zeros((batch_size, timesteps, 4))
@@ -104,18 +124,24 @@ class ParticleFilter(Bayes):
 
             for t in range(tmp_t):
                 z = batch_positions[i, t]
-                imm_pf.predict_cv()
+                imm_pf.predict_particles()
                 imm_pf.update(z)
                 imm_pf.resample()
                 predictions[i, t] = imm_pf.estimate_average()
             
             for t in range(tmp_t, timesteps):
-                imm_pf.predict_cv()
+                imm_pf.predict_particles()
                 predictions[i, t] = imm_pf.estimate_average()
         
         return predictions
     
-    def hyperparameter_tuning(self, batch_positions,index = 0):
+    def hyperparameter_tuning(self, batch_positions):
+        """
+            Applies hyperparameter tuning by trying the PF with different sets of parameters 
+            and setting the internal parameters to the set achieving the best ADE.
+
+            :param batch_positions tarjectories with the shape (batch_size, sequence_length, 2)
+        """
         # Define the parameter grid
         param_grid = {
             'num_particles': [1000, 2000, 5000],
@@ -125,32 +151,25 @@ class ParticleFilter(Bayes):
 
         }
 
-        # Generate combinations of parameters
         grid = ParameterGrid(param_grid)
-
         best_score = float('inf')
         best_params = None
 
-        # Grid search loop
         for params in grid:
-            # Initialize the IMMParticleFilter with current parameters
             self.params['num_particles'] = params['num_particles']
             self.params['process_noise_cv'] = params['process_noise_cv']
             self.params['measurement_noise'] = params['measurement_noise']
             self.params['dt'] = params['dt']
             
-            # Run the filter on your data and calculate the prediction error
             predictions = self.predict(batch_positions[:])
             
-            # Calculate the error using the modified function
-            error = self.calculate_meanADE(batch_positions[:], predictions, dim=2)
+            error = self.calculate_meanADE(batch_positions[:], predictions)
 
-            # Update the best parameters if the current configuration yields a lower error
+            # Update the best parameters
             if error < best_score:
                 best_score = error
                 best_params = params
 
-        # Print the best hyperparameters and corresponding score
         print("Best Parameters:", best_params)
         print("Best Score:", best_score)
         self.params = best_params
