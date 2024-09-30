@@ -317,6 +317,7 @@ class IMM_CVCT_2D(Bayes):
         return smoothed_predictions
 
     def predict(self, batch_positions):
+        tmp_t =5
         batch_size, timesteps, _ = batch_positions.shape
         prediction_timesteps = 15  # 10 updates + 5 predictions
         predictions = np.zeros((batch_size, prediction_timesteps, 2))  # Predicting only (x, y) positions
@@ -332,21 +333,21 @@ class IMM_CVCT_2D(Bayes):
             imm = self.create_imm_cvct_estimator(initial_state)
 
             # IMM prediction and update for the first 10 timesteps
-            for t in range(5):
+            for t in range(tmp_t):
                 z = batch_positions[i, t]
                 imm.predict()
                 imm.update(z)
                 predictions[i, t] = imm.x[:2]
 
             # Apply a refined smoothing technique to the first 10 timesteps
-            predictions[i, :5, :] = self.smooth(predictions[i, :5, :], alpha=0.6)
+            predictions[i, :tmp_t, :] = self.smooth(predictions[i, :tmp_t, :], alpha=0.6)
 
-            # Predicting the next 5 timesteps without measurement updates
-            for t in range(5, prediction_timesteps):
+            # Predicting the next tmp_t timesteps without measurement updates
+            for t in range(tmp_t, prediction_timesteps):
                 imm.predict()
                 predictions[i, t] = imm.x[:2]
 
-            # Apply smoothing to the last 5 timesteps of predictions
+            # Apply smoothing to the last tmp_t timesteps of predictions
             predictions[i, :prediction_timesteps, :] = self.smooth(predictions[i, :prediction_timesteps, :], alpha=0.6)
 
         return predictions

@@ -3,7 +3,7 @@ import datetime
 import tensorflow as tf
 import tensorflow_models as tfm
 import tensorflow_probability as tfp
-from .preprocess_data import load_data, load_synthetic_data
+from .preprocess_data import load_data
 import logging
 from .layers_adap import *
 from .metrics import *
@@ -187,10 +187,10 @@ def train_model():
     #train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
     # done loadeing in 36 minutes before and now only load 
     train_dataset = tf.data.experimental.load(
-    "/home/annalena/PedestrianTrajectoryPrediction/datasets/train_dataset_eth_aug"
+    "/home/annalena/PedestrianTrajectoryPrediction/datasets/train_dataset_synth_norm"
     )
     test_dataset = tf.data.experimental.load(
-    "/home/annalena/PedestrianTrajectoryPrediction/datasets/test_dataset_eth_aug"
+    "/home/annalena/PedestrianTrajectoryPrediction/datasets/test_dataset_synth_norm"
     )
     print("loaded dataset")
     print(len(train_dataset))
@@ -215,9 +215,9 @@ def train_model():
         os.path.join(tensorboard_dir, 'eval'))
 
 
-    batches_per_train_step=200 #25000
-    batches_per_eval_step =100 # 2000
-    eval_every_n_step = 800 #1e4
+    batches_per_train_step=400 #25000
+    batches_per_eval_step =200 # 2000
+    eval_every_n_step = 1200 #1e4
 
     strategy = tf.distribute.OneDeviceStrategy('gpu')
 
@@ -225,7 +225,7 @@ def train_model():
     dist_eval_dataset = strategy.experimental_distribute_dataset(test_dataset)
 
     learning_rate_schedule = _get_learning_rate_schedule(
-        warmup_steps=2000, total_steps=6000,
+        warmup_steps=4000, total_steps=8000,
         learning_rate=1e-3)
     #learning_rate_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         #initial_learning_rate=1e-3,
@@ -262,10 +262,10 @@ def train_model():
     checkpoint = tf.train.Checkpoint(model=model,
                                     optimizer=optimizer,
                                     best_eval_loss=best_eval_loss)
-    latest_checkpoint = tf.train.latest_checkpoint("/home/annalena/PedestrianTrajectoryPrediction/trained_models/trained_synth/ckpts_best/ckpt/")
-    checkpoint.restore(latest_checkpoint)#.assert_existing_objects_matched()
-    logging.info('Restored from checkpoint: %s', latest_checkpoint)
-    current_global_step =  optimizer.iterations.numpy()
+    #latest_checkpoint = tf.train.latest_checkpoint("/home/annalena/PedestrianTrajectoryPrediction/trained_models/trained_synth/ckpts_best/ckpt/")
+    #checkpoint.restore(latest_checkpoint)#.assert_existing_objects_matched()
+    #logging.info('Restored from checkpoint: %s', latest_checkpoint)
+    current_global_step = 0 # optimizer.iterations.numpy()
     checkpoint_best = tf.train.Checkpoint(model=model)
     best_checkpoint_manager = tf.train.CheckpointManager(checkpoint_best,
                                                         checkpoint_prefix_best,
@@ -274,7 +274,7 @@ def train_model():
      # 5) Actual Training Loop
     train_iter = iter(dist_train_dataset)
     eval_iter = iter(dist_eval_dataset)
-    total_train_steps = 8000#60 # 1e6
+    total_train_steps = 6000#60 # 1e6
     num_train_iter = (
         total_train_steps // batches_per_train_step)
     current_train_iter = (

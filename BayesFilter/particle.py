@@ -63,6 +63,11 @@ class ParticleFilter(Bayes):
         self.weights_cv /= np.sum(self.weights_cv)
 
     def resample(self):
+        self.weights_cv = np.nan_to_num(self.weights_cv, nan=0.0)
+        if np.sum(self.weights_cv) == 0:
+            self.weights_cv.fill(1.0 / self.params['num_particles'])
+        else:
+            self.weights_cv /= np.sum(self.weights_cv)
         indices_cv = np.random.choice(self.params['num_particles'], size=self.params['num_particles'], p=self.weights_cv)
         self.particles_cv = self.particles_cv[indices_cv]
         self.weights_cv.fill(1.0 / self.params['num_particles'])
@@ -87,6 +92,7 @@ class ParticleFilter(Bayes):
         return np.array(combined_estimates)
 
     def predict(self, batch_positions):
+        tmp_t = 5
         batch_size, timesteps, _ = batch_positions.shape
         predictions = np.zeros((batch_size, timesteps, 4))
         
@@ -96,14 +102,14 @@ class ParticleFilter(Bayes):
             initial_velocity = imm_pf.estimate_initial_velocity(first_two_observations)
             imm_pf.create_particles_with_estimated_velocity(first_two_observations[0], initial_velocity)
 
-            for t in range(5):
+            for t in range(tmp_t):
                 z = batch_positions[i, t]
                 imm_pf.predict_cv()
                 imm_pf.update(z)
                 imm_pf.resample()
                 predictions[i, t] = imm_pf.estimate_average()
             
-            for t in range(5, timesteps):
+            for t in range(tmp_t, timesteps):
                 imm_pf.predict_cv()
                 predictions[i, t] = imm_pf.estimate_average()
         

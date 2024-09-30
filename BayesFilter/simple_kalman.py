@@ -38,8 +38,7 @@ class Kalman_CV(Bayes):
             predicted states (position and velocity) for each timestep in each batch.
         """
         batch_size, timesteps, _ = batch_positions.shape
-        assert timesteps == 15, "The input should have 15 timesteps per sequence."
-        
+        tmp_t = 8
         predictions = np.zeros((batch_size, 15, self.pos_dim*2))
         dt = self.params['dt']
 
@@ -97,14 +96,14 @@ class Kalman_CV(Bayes):
             
             
             # Running the Kalman Filter for the first 5 timesteps
-            for t in range(5):
+            for t in range(tmp_t):
                 z = batch_positions[i, t]
                 kf.predict()
                 kf.update(z)
                 predictions[i, t] = kf.x
             
             # Predicting the next 10 timesteps without updating
-            for t in range(5, 15):
+            for t in range(tmp_t, 15):
                 kf.predict()
                 predictions[i, t] = kf.x
         
