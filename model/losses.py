@@ -1,3 +1,9 @@
+"""
+Losses from https://github.com/google-research/human-scene-transformer losses but adapted to work without the agent dimension
+and only work on single trajectories.
+Adaptions are mainly in different data handling (assumes data input as tuple with position and pose) as well as almost every process 
+needed adaptipon in handling the axis due to the missing neighbouring agents.
+"""
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -262,7 +268,6 @@ class MinNLLMixtureCategoricalCrossentropyLoss(PositionNLLLoss):
     min_nll_indices_one_hot = tf.one_hot(min_nll_indices[..., 0], n)
 
     # [b, a]
-    # TODO
     #mixture_loss = self.mixture_loss(
         #min_nll_indices_one_hot,
         #tf.tile(predictions['mixture_logits'][..., 0, :], [1, a, 1]))

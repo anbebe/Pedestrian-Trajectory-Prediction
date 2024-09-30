@@ -1,16 +1,23 @@
+"""
+Training process from https://github.com/google-research/human-scene-transformer metrics but adapted to work without the agent dimension
+and only work on single trajectories.
+"""
 import os
 import datetime
 import tensorflow as tf
 import tensorflow_models as tfm
 import tensorflow_probability as tfp
-from .preprocess_data import load_data
+from preprocess_data import load_data
 import logging
-from .layers_adap import *
-from .metrics import *
-from .losses import *
+from layers_adap import *
+from metrics import *
+from losses import *
 logging.getLogger().setLevel(logging.INFO)
 
 class HST(tf.keras.Model):
+    """
+    Create single-agent Human Scene Transformer
+    """
     def __init__(self, input_length):
         super().__init__()
 
@@ -30,6 +37,24 @@ class HST(tf.keras.Model):
         self.prediction_layer = Prediction2DPositionHeadLayer()
 
     def call(self, input_batch, training = False):
+        """
+        One call of the HST that preprocesses the input data and outputs a dictionary:
+        output_dict={
+            "masked_inputs": (masked_input_pos, masked_input_pose),
+            "has_data", 
+            "is_hidden", 
+            "targets",
+            "has_historic_data",
+            "should_predict",
+            "hidden vecs
+        }
+        and the predicted:
+            predictions = {
+                'position',
+                'position_raw_scale',
+                'mixture_logits'
+            }
+        """
         (input_1, input_2) = input_batch
         output_dict = self.preprocess_layer((input_1, input_2)) # output shape (batch_size, 15, 3)
 
@@ -58,43 +83,6 @@ class HST(tf.keras.Model):
         return output_dict, pred
 
 
-def build_model():
-    input_length=15
-    input_dim_1 = 3
-    input_dim_2 = 51
-
-    
-    # Define a simple model that includes the custom layer
-    input_1 = tf.keras.Input(shape=(input_length, input_dim_1))
-    input_2 = tf.keras.Input(shape=(input_length, input_dim_2))
-
-    hidden_size = 128
-    masked_inputs, mask, targets = PreprocessLayer()((input_1, input_2)) # output shape (batch_size, 15, 3)
-  
-    encoded_agent, _ = FeatureAttnAgentEncoderLearnedLayer(input_length=input_length)((masked_inputs, mask))
-    self_encoded_agent, _ = AgentSelfAlignmentLayer()((encoded_agent, mask))
-    transformed1, _ = SelfAttnTransformerLayer(mask=True)((self_encoded_agent, mask))
-    transformed2, _ = SelfAttnTransformerLayer(mask=True)((transformed1, mask))
-    transformed3, logits = MultimodalityInduction()((transformed2, mask))
-    transformed4, _ = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)((transformed3, mask))
-    transformed5, _ = SelfAttnModeTransformerLayer()(transformed4)
-    transformed6, _ = SelfAttnTransformerLayer(mask=True, multimodality_induced=True)((transformed5, mask))
-    transformed7, _ = SelfAttnModeTransformerLayer()(transformed6)
-    pred = Prediction2DPositionHeadLayer()(transformed7)
-    
-    
-    output_dict = {
-        'mask': mask,
-        'position': pred[...,0:2],
-        'position_raw_scale': pred[...,2:],
-        'mixture_logits': logits,
-        'targets': targets
-    }
-
-
-    model = tf.keras.Model(inputs=(input_1, input_2), outputs=output_dict)
-
-    return model
 
 # Define Training and Eval tf.function.
 @tf.function
@@ -214,7 +202,7 @@ def train_model():
     eval_summary_writer = tf.summary.create_file_writer(
         os.path.join(tensorboard_dir, 'eval'))
 
-
+    # parameters that can be adapted to the dataset at hand
     batches_per_train_step=400 #25000
     batches_per_eval_step =200 # 2000
     eval_every_n_step = 1200 #1e4
@@ -224,17 +212,13 @@ def train_model():
     dist_train_dataset = strategy.experimental_distribute_dataset(train_dataset)
     dist_eval_dataset = strategy.experimental_distribute_dataset(test_dataset)
 
+    # learning rate parameters can be adapted to the dataset at hand
     learning_rate_schedule = _get_learning_rate_schedule(
         warmup_steps=4000, total_steps=8000,
         learning_rate=1e-3)
-    #learning_rate_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-        #initial_learning_rate=1e-3,
-        #decay_steps=10000,
-        #decay_rate=0.9)
 
     current_global_step = 0
 
-    
 
     with strategy.scope():
         model = HST(15)
@@ -246,7 +230,6 @@ def train_model():
         'loss': Mean(),
         'loss_position': Mean(),
         'min_ade': MinADE(),
-        #'ml_ade': MLADE(),
         'pos_nll': PositionNegativeLogLikelihood()
         }
 
@@ -254,7 +237,6 @@ def train_model():
         'loss': Mean(),
         'loss_position': Mean(),
         'min_ade': MinADE(),
-        #'ml_ade': MLADE(),
         'pos_nll': PositionNegativeLogLikelihood()
         }
 
@@ -262,6 +244,7 @@ def train_model():
     checkpoint = tf.train.Checkpoint(model=model,
                                     optimizer=optimizer,
                                     best_eval_loss=best_eval_loss)
+    # if available, load checkpoint from path and set current global step to the tsep of the pretrained model
     #latest_checkpoint = tf.train.latest_checkpoint("/home/annalena/PedestrianTrajectoryPrediction/trained_models/trained_synth/ckpts_best/ckpt/")
     #checkpoint.restore(latest_checkpoint)#.assert_existing_objects_matched()
     #logging.info('Restored from checkpoint: %s', latest_checkpoint)
@@ -274,13 +257,14 @@ def train_model():
      # 5) Actual Training Loop
     train_iter = iter(dist_train_dataset)
     eval_iter = iter(dist_eval_dataset)
-    total_train_steps = 6000#60 # 1e6
+
+    # parameter to be adapted to the dataset
+    total_train_steps = 6000 # 1e6
     num_train_iter = (
         total_train_steps // batches_per_train_step)
     current_train_iter = (
         current_global_step // batches_per_train_step)
 
-    #print("range: ",range(current_train_iter, num_train_iter))
 
     logging.info('Beginning training.')
     for step in range(current_train_iter, num_train_iter):
@@ -340,17 +324,6 @@ def train_model():
                 checkpoint_name = checkpoint.save(checkpoint_prefix)
                 logging.info('Saved checkpoint to %s', checkpoint_name)
     
-
-
-def test_model():
-    batch_size = 32
-    train_dataset, test_dataset = load_data(data_path="/home/pbr-student/personal/thesis/test/PedestrianTrajectoryPrediction/df_jrdb.pkl", batch_size=batch_size)
-    
-    model = build_model()
-
-    for (batch_x1, batch_x2) in train_dataset.take(1):
-        output2 = model.predict((batch_x1, batch_x2))
-        break
 
 if __name__ == "__main__":
     train_model()

@@ -1,7 +1,15 @@
+"""
+Layers from https://github.com/google-research/human-scene-transformer model but adapted to work without the agent dimension
+and only work on single trajectories.
+Adaptions are mainly in different data handling (assumes data input as tuple with position and pose) as well as almost every process 
+in the form of attention, building learned queries or applying feed forward layer needed adaptipon in handling the axis due to the missing
+neighbouring agents.
+"""
+
 import tensorflow as tf
 import numpy as np
 from typing import Tuple, Optional
-import keras_nlp
+
 
 class PreprocessLayer(tf.keras.layers.Layer):
     """ Applies the masking to the sequence
@@ -70,6 +78,7 @@ class PreprocessLayer(tf.keras.layers.Layer):
 
         targets = input_batch_new[0]
 
+        # adapted output dict, changed naming conventions for easier handling
         output_dict={
             "masked_inputs": (masked_input_pos, masked_input_pose),
             "has_data": has_data, 
@@ -81,7 +90,6 @@ class PreprocessLayer(tf.keras.layers.Layer):
 
         return output_dict
 
-""" Adapted Sinusoidal Embedding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/embedding.py    """
 class SinusoidalEmbeddingLayer(tf.keras.layers.Layer):
   """Sinusoidal Postional Embedding for xyz and time."""
 
@@ -116,7 +124,6 @@ class SinusoidalEmbeddingLayer(tf.keras.layers.Layer):
                          axis=-1)
     return embedded
 
-""" Adapted Agent Position Encoding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/agent_feature_encoder.py    """
 class AgentPositionEncoder(tf.keras.layers.Layer):
   """Encodes agents spatial positions."""
 
@@ -126,6 +133,7 @@ class AgentPositionEncoder(tf.keras.layers.Layer):
 
     self.embedding_layer = SinusoidalEmbeddingLayer(
       hidden_size=128) # output_shape (batch_sie, sequence_length, feature size, hidden_size)
+    # tried out pther embeddings
     #self.embedding_layer = keras_nlp.layers.SinePositionEncoding(max_wavelength=10000)
     #self.layer_norm = tf.keras.layers.LayerNormalization(axis=-1)  
     self.mlp = tf.keras.layers.EinsumDense(
@@ -157,6 +165,7 @@ class AgentTemporalEncoder(tf.keras.layers.Layer):
     self.embedding_layer = SinusoidalEmbeddingLayer(
         max_freq=num_steps,
         hidden_size=128)
+    # tried out other positional encoding
     #self.embedding_layer = keras_nlp.layers.SinePositionEncoding(max_wavelength=10000)
 
     self.mlp = tf.keras.layers.EinsumDense(
@@ -182,8 +191,6 @@ class AgentTemporalEncoder(tf.keras.layers.Layer):
             tf.ones_like(has_data))
   
 
-  """ Adapted Agent Keypoint Encoding Layer from source: https://github.com/google-research/human-scene-transformer/blob/main/human_scene_transformer/model/agent_feature_encoder.py    """
-
 class AgentKeypointsEncoder(tf.keras.layers.Layer):
   """Encodes the agent's keypoints."""
 
@@ -196,13 +203,6 @@ class AgentKeypointsEncoder(tf.keras.layers.Layer):
         bias_axes='h',
         activation=tf.nn.relu)
 
-  """def call(self, input_batch, training=None):
-
-    keypoints = input_batch[1]
-
-    out = self.mlp1(keypoints)
-
-    return out"""
   def call(self, input_dict, training=None):
     is_hidden = input_dict["is_hidden"]
     has_data = input_dict["has_data"]
@@ -217,7 +217,6 @@ class AgentKeypointsEncoder(tf.keras.layers.Layer):
     return out, mask
 
 class FeatureConcatAgentEncoderLayer(tf.keras.layers.Layer):
-  
 
   """Independently encodes features and attends to them.
 

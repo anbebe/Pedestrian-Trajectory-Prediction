@@ -1,3 +1,9 @@
+"""
+Metrics from https://github.com/google-research/human-scene-transformer metrics but adapted to work without the agent dimension
+and only work on single trajectories.
+Adaptions are mainly in different data handling (assumes data input as tuple with position and pose) as well as almost every process 
+needed adaptipon in handling the axis due to the missing neighbouring agents.
+"""
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -15,7 +21,6 @@ class ADE(tf.keras.metrics.Metric):
 
   Calculates the mean L2 distance over all predicted timesteps.
   """
-  # TODO: timestep?
   def __init__(self, num_history_steps=6, timestep=0.4, cutoff_seconds=None, at_cutoff=False, name='ADE'):
     """Initializes the ADE metric.
 
