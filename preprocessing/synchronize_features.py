@@ -282,6 +282,17 @@ def draw_prediction_on_image(
     return image_np
 
 def get_pose2(movenet, frame, bbox):
+    """
+    Detects a person's keypoints using MoveNet on a cropped image based on the bounding box.
+
+    Args:
+        movenet: Pretrained MoveNet model.
+        frame: The full image frame as a NumPy array.
+        bbox: Bounding box coordinates [x_min, y_min, x_max, y_max].
+
+    Returns:
+        List: A list of keypoints (x, y, confidence) for the detected person.
+    """
     #offset = 0
     #cropped_img = frame.copy()[bbox[1]-offset:bbox[3]+offset, bbox[0]-offset:bbox[2]+offset]
     cropped_img = frame.copy()[bbox[1]:bbox[3], bbox[0]:bbox[2]]
@@ -302,6 +313,19 @@ def get_pose2(movenet, frame, bbox):
     return detections
 
 def update_dets(idx, track_res, id_dict, test_syn_data, movenet):
+    """
+    Updates detection data with person keypoints for tracked objects.
+
+    Args:
+        idx: The index of the current frame in the synchronized dataset.
+        track_res: List of tracked objects.
+        id_dict: Dictionary mapping object IDs to labels.
+        test_syn_data: The synchronized dataset containing detections.
+        movenet: Pretrained MoveNet model.
+
+    Returns:
+        Dict: Updated synchronized dataset with keypoints for each person.
+    """
     new_sync_data = test_syn_data
     for i in range(len(test_syn_data["detections"][idx])):
         obj = test_syn_data["detections"][idx][i]
@@ -455,6 +479,17 @@ def filter_ids(df, row, ids, index):
 
 
 def rosbag_to_tracks(file, path):
+    """
+    Processes a rosbag file to extract, synchronize, track, and filter person trajectories,
+    then saves the synchronized data as a pickle file
+
+    Args:
+        file : name of the rosbag file to process
+        path :  directory path where the rosbag file is located
+
+    Returns:
+        pandas dataframe containing the synchronized data after person tracking and filtering
+    """
 
     start_time = time.time()
     path_ = os.path.join(path, file)

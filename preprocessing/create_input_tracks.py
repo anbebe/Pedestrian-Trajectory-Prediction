@@ -9,6 +9,9 @@ import torchreid
 import pandas as pd
 
 def pad_img(im):
+    """
+    Pads an image to the desired size
+    """
     desired_size = 368
     old_size = im.shape[:2] # old_size is in (height, width) format
 
@@ -31,6 +34,14 @@ def pad_img(im):
     return new_im
 
 def get_cropped_img(bbox, img):
+    """
+    Crop an image based on a bounding box
+
+    :param bbox: bounding box defined by centroid in 2D and width and length
+    :param img: image
+
+    :returns cropped image
+    """
     x, y, w, h = bbox
     x, y, w, h = int(x), int(y), int(w), int(h)
     cropped_img = img.copy()[y:h, x:w]
@@ -38,6 +49,9 @@ def get_cropped_img(bbox, img):
     return cropped_img
 
 def pad_voxelgrids(voxel_list):
+    """
+    Pads voxel grids to a fixed size
+    """
     voxels = []
     for v in voxel_list:
         v = np.asarray(v)
@@ -54,6 +68,17 @@ def pad_voxelgrids(voxel_list):
     
 
 def filter_tracks(curr_id, sync_data, extractor, counter):
+    """
+    Filter tracks of a specific pedestrian ID by comparing image and voxel features,
+    saves the corresponding track animation if enpough frames are found
+
+    :param curr_id: the pdestrian id
+    :param sync_data: the synchronized data in a dataframe containing all features
+    :param extractor: feature extracttor model from torchreid for comparing images
+    :param counter: counter for naming the tracks uniquely
+
+    :returns dictionary containing the track infomration 
+    """
     imgs = [] # no necessary feature, only for filtering
     voxs = []
     positions = []
@@ -104,6 +129,14 @@ def filter_tracks(curr_id, sync_data, extractor, counter):
 
 
 def get_single_tracks(sync_data, counter):
+    """
+    Extracts and filters tracks for all pedestrians in the synchronized data
+
+    :param sync_data: synchronized data by tiemstamp containing detection, images, voxelgrids and odometry data
+    :param counter: for creating unique pedestrian ids
+
+    :returns list of dictionaries, each containing a single trajectory
+    """
     detections = sync_data.iloc[:]["detections"]
     all_ids = [x[0] for y in detections for x in y]
     occurs_id, occurs_counts = np.unique(np.asarray(all_ids), return_counts=True)
@@ -123,17 +156,4 @@ def get_single_tracks(sync_data, counter):
 
 
 
-
-if __name__ == "__main__":
-
-    # load pickle
-    sync_data = pd.read_pickle("synced_data/data_2021-04-24-13-27-09.pkl")
-    
-    
-    tracks = get_single_tracks(sync_data)
-
-    track_df = pd.DataFrame.from_dict(tracks)
-    old_track = pd.read_pickle('full_tracks.pkl')
-    track_df = pd.concat([old_track, track_df], axis=0)
-    track_df.to_pickle('full_tracks.pkl')
 

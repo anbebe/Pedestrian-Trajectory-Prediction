@@ -1,3 +1,7 @@
+"""
+Script that calls all necessary other files and functions to preprocess raw rosbags to
+single pedestrian trajectories with position and pose information
+"""
 #global
 import argparse
 import os
@@ -19,13 +23,15 @@ if __name__ == "__main__":
 
     counter = 0
 
+    # loops through all rosbags in the given directory, creates dataframes with necessary info
     for file in os.listdir(path):
-        if file.endswith(".bag"):
+        if file.endswith(".bag"):   
             counter += 1
             synced_data = rosbag_to_tracks(file, path)
             new_tracks = get_single_tracks(synced_data, counter)
             all_tracks.append(pd.DataFrame.from_dict(new_tracks))
 
+    # concatenates all trajectories
     if len(all_tracks) > 1:
         df = pd.concat([all_tracks[0], all_tracks[1]], axis=0)
         if len(all_tracks) > 2:
