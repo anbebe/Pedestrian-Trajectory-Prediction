@@ -1,8 +1,8 @@
 # Pedestrian Trajectory Prediction - Master Thesis
 
-This repository is part of my master thesis, focusing on pedestrian trajectory prediction. The project aims to compare classical approaches such as Bayesian filters and particle filters with modern neural network-based approaches like the Human Scene Transformer (HST). The key objective is to determine if neural networks provide a tangible advantage for simple pedestrian trajectory prediction problems like single trajectories in open spaces.
+This repository is part of my master thesis, focusing on pedestrian trajectory prediction. The project aims to compare classical approaches such as Bayesian filters and particle filters with modern neural network-based approaches like the Human Scene Transformer (HST). The key objective is to determine if neural networks provide a significant advantage for simple pedestrian trajectory prediction problems like single trajectories in open spaces.
 
-IT IS STILL IN PROGESS AND NOT FINISHED OR USABLE !!!
+The whole tesis can be found as thesis.pdf in this repository.
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -12,13 +12,9 @@ IT IS STILL IN PROGESS AND NOT FINISHED OR USABLE !!!
   - [Human Scene Transformer](#human-scene-transformer)
 - [Installation](#installation)
 - [Usage](#usage)
-  - [Training the Human Scene Transformer](#training-the-human-scene-transformer)
-  - [Running Bayesian and Particle Filters](#running-bayesian-and-particle-filters)
-  - [Comparative Analysis](#comparative-analysis)
-- [Results and Discussion](#results-and-discussion)
-- [Future Work](#future-work)
-- [Contributing](#contributing)
-- [License](#license)
+  - [Preprocessing](#preprocessing)
+  - [Training the HST Model](#training-the-hst-model)
+  - [Analyzing the Models](#analyzing-the-models)
 
 ## Introduction
 
@@ -31,7 +27,13 @@ The hypothesis is based on the assumption that it is not sufficient to only mode
 
 ## Repository Structure
 
-The repository is nto fully organized until now, but will come soon ...
+The repository is mainly divided in preprocessing data, the adapted HST model the different non-deep learning methods and notebooks for testing different aspects.
+
+The preprocessing folder inhibits the preprocessing pipelines for the JRDB and Crowdbot datasets in order to standardize them as input for the HST. 
+
+The model folder inhibits the single-agent adapted HST model, its layers, losses, metrics, preprocessing and the train process. In order to train the model, inside the train.py the specific dataset and model parameters need to be set in the main function. Moreover, the notebooks folder inhibits the hst_analysis notebook where trained models can be tested towards prediction accuracy and visualised outputs.
+
+The BayesFilter folder inhibits the different models (Kalman FIlter (simple_kalman), Interacting Multiple Model (imm) and the Particle Filter (PF)), where the Bayes Filter is the parent for the KF and IMM to keep it comparable. The analyse_models.ipynb offers the structure to load a dataset, one or more of the models and test their prediction accuracies.
 
 
 ## Implemented Approaches
@@ -40,9 +42,9 @@ The repository is nto fully organized until now, but will come soon ...
 
 The repository includes several Bayesian filters commonly used for pedestrian trajectory prediction:
 
-- **Kalman Filter**: A linear quadratic estimation algorithm used for filtering and predicting the state of a dynamic system.
-- **Interacting Multiple Model (IMM) Filter**: A probabilistic filter that combines multiple Kalman filters for tracking objects with different motion models.
-- **Particle Filter**: A non-parametric filter that approximates the posterior distribution of the state using a set of weighted particles. It is particularly useful for non-linear and non-Gaussian tracking problems.
+- **Kalman Filter**: Using the constant velocity model to adapt to the data and then predicting the next steps.
+- **Interacting Multiple Model (IMM) Filter**: Combines multiple Kalman filters (1 constant velocity and three cosntant turn models) for trajectory prediction.
+- **Particle Filter**: Using the constant velocity model to adapt to the data and then predicting the next steps. The output is the weighted sum of all particles as trajectory
 
 ### Human Scene Transformer
 
@@ -60,7 +62,27 @@ cd pedestrian-trajectory-prediction
 pip install -r requirements.txt
 
 ## Usage
-ToDo
+### Preprocessing
+All preprocessing saves the data afterwards as pickles (pandas dataframe).
+Preprocess JRDB dataset (after downloading the JRDB train dataset with activity from JRDB-Pose):
+
+python preprocessing/preprocess_jrdb.py
+
+Preprocess Crowdbo dataset (after downloading the raw rosbags):
+
+python preprocessing/preprocess_rosbags.py
+
+For transforming the features afterwards from robot to odometry frame use the crowdbot_transform.ipynb
+
+### Training the HST model
+Train the single-agent HST model by setting in the main the parameters and then:
+
+python model/train.py
+
+### Analyzing the models
+Analyse the predictions of the single-agent HST model with notebooks/hst_analysis.ipynb
+
+Analyse the predictions of the KF, IMM and PF with BayesFilter/analyse_models.ipynb
 
 Based on https://github.com/google-research/human-scene-transformer/tree/main and
 ```
